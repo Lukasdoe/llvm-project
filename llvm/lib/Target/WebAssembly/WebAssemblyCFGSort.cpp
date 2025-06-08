@@ -20,8 +20,10 @@
 #include "WebAssemblyExceptionInfo.h"
 #include "WebAssemblySortRegion.h"
 #include "WebAssemblyUtilities.h"
+
 #include "llvm/ADT/PriorityQueue.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
@@ -44,6 +46,10 @@ static cl::opt<bool> WasmDisableEHPadSort(
         "WebAssembly: Disable EH pad-first sort order. Testing purpose only."),
     cl::init(false));
 
+static cl::opt<bool> WasmEnableMBBProbSorting("wasm-enable-mbb-prob-sorting",
+                                              cl::ReallyHidden, cl::desc(""),
+                                              cl::init(false));
+
 namespace {
 
 class WebAssemblyCFGSort final : public MachineFunctionPass {
@@ -53,6 +59,8 @@ class WebAssemblyCFGSort final : public MachineFunctionPass {
     AU.setPreservesCFG();
     AU.addRequired<MachineDominatorTreeWrapperPass>();
     AU.addPreserved<MachineDominatorTreeWrapperPass>();
+    AU.addRequired<MachineBranchProbabilityInfoWrapperPass>();
+    AU.addPreserved<MachineBranchProbabilityInfoWrapperPass>();
     AU.addRequired<MachineLoopInfoWrapperPass>();
     AU.addPreserved<MachineLoopInfoWrapperPass>();
     AU.addRequired<WebAssemblyExceptionInfo>();
@@ -137,16 +145,16 @@ namespace {
 
 /// Sort blocks by their number.
 struct CompareBlockNumbers {
-  bool operator()(const MachineBasicBlock *A,
-                  const MachineBasicBlock *B) const {
-    if (!WasmDisableEHPadSort) {
-      if (A->isEHPad() && !B->isEHPad())
-        return false;
-      if (!A->isEHPad() && B->isEHPad())
-        return true;
+  bool
+  operator()(const std::pair<BranchProbability, MachineBasicBlock *> A,
+             const std::pair<BranchProbability, MachineBasicBlock *> B) const {
+    if (WasmEnableMBBProbSorting &&
+        (!A.first.isUnknown() || !B.first.isUnknown())) {
+      // return true if A is less likely to be taken than B => should be
+      // placed after B
+      return A.first < B.first;
     }
-
-    return A->getNumber() > B->getNumber();
+    return A.second->getNumber() > B.second->getNumber();
   }
 };
 /// Sort blocks by their number in the opposite order..
@@ -184,7 +192,8 @@ struct Entry {
 /// Explore them.
 static void sortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI,
                        const WebAssemblyExceptionInfo &WEI,
-                       MachineDominatorTree &MDT) {
+                       MachineDominatorTree &MDT,
+                       const MachineBranchProbabilityInfo &MBPI) {
   // Remember original layout ordering, so we can update terminators after
   // reordering to point to the original layout successor.
   MF.RenumberBlocks();
@@ -211,7 +220,8 @@ static void sortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI,
   // processed successors, to help preserve block sequences from the original
   // order. Ready has the remaining ready blocks. EH blocks are picked first
   // from both queues.
-  PriorityQueue<MachineBasicBlock *, std::vector<MachineBasicBlock *>,
+  PriorityQueue<std::pair<BranchProbability, MachineBasicBlock *>,
+                std::vector<std::pair<BranchProbability, MachineBasicBlock *>>,
                 CompareBlockNumbers>
       Preferred;
   PriorityQueue<MachineBasicBlock *, std::vector<MachineBasicBlock *>,
@@ -272,14 +282,14 @@ static void sortBlocks(MachineFunction &MF, const MachineLoopInfo &MLI,
           if (IsDeferred)
             continue;
         }
-        Preferred.push(Succ);
+        Preferred.push({MBPI.getEdgeProbability(MBB, Succ), Succ});
       }
     }
     // Determine the block to follow MBB. First try to find a preferred block,
     // to preserve the original block order when possible.
     MachineBasicBlock *Next = nullptr;
     while (!Preferred.empty()) {
-      Next = Preferred.top();
+      Next = Preferred.top().second;
       Preferred.pop();
       // If X isn't dominated by the top active region header, defer it until
       // that region is done.
@@ -387,12 +397,14 @@ bool WebAssemblyCFGSort::runOnMachineFunction(MachineFunction &MF) {
 
   const auto &MLI = getAnalysis<MachineLoopInfoWrapperPass>().getLI();
   const auto &WEI = getAnalysis<WebAssemblyExceptionInfo>();
+  const auto &MBPI =
+      getAnalysis<MachineBranchProbabilityInfoWrapperPass>().getMBPI();
   auto &MDT = getAnalysis<MachineDominatorTreeWrapperPass>().getDomTree();
   // Liveness is not tracked for VALUE_STACK physreg.
   MF.getRegInfo().invalidateLiveness();
 
   // Sort the blocks, with contiguous sort regions.
-  sortBlocks(MF, MLI, WEI, MDT);
+  sortBlocks(MF, MLI, WEI, MDT, MBPI);
 
   return true;
 }

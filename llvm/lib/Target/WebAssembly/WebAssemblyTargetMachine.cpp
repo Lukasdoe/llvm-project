@@ -53,6 +53,10 @@ static cl::opt<bool> WasmDisableFixIrreducibleControlFlowPass(
              " irreducible control flow optimization pass"),
     cl::init(false));
 
+static cl::opt<bool> WasmEnableMaschineBLockPlacementPass(
+    "wasm-enable-machine-block-placement-pass", cl::Hidden, cl::desc(""),
+    cl::init(false));
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeWebAssemblyTarget() {
   // Register the target.
   RegisterTargetMachine<WebAssemblyTargetMachine> X(
@@ -91,6 +95,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeWebAssemblyTarget() {
   initializeWebAssemblyLowerRefTypesIntPtrConvPass(PR);
   initializeWebAssemblyFixBrTableDefaultsPass(PR);
   initializeWebAssemblyDAGToDAGISelLegacyPass(PR);
+  initializeMachineBlockPlacementLegacyPass(PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -566,9 +571,11 @@ void WebAssemblyPassConfig::addPostRegAlloc() {
   disablePass(&ShrinkWrapID);
   disablePass(&RemoveLoadsIntoFakeUsesID);
 
-  // This pass hurts code size for wasm because it can generate irreducible
-  // control flow.
-  disablePass(&MachineBlockPlacementID);
+  if (!WasmEnableMaschineBLockPlacementPass) {
+    // This pass hurts code size for wasm because it can generate irreducible
+    // control flow.
+    disablePass(&MachineBlockPlacementID);
+  }
 
   TargetPassConfig::addPostRegAlloc();
 }
