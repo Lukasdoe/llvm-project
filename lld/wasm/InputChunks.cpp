@@ -381,10 +381,9 @@ bool InputChunk::generateRelocationCode(raw_ostream &os) const {
 
   bool is64 = ctx.arg.is64.value_or(false);
   bool generated = false;
-  unsigned opcode_ptr_const = is64 ? WASM_OPCODE_I64_CONST
-                                   : WASM_OPCODE_I32_CONST;
-  unsigned opcode_ptr_add = is64 ? WASM_OPCODE_I64_ADD
-                                 : WASM_OPCODE_I32_ADD;
+  unsigned opcode_ptr_const =
+      is64 ? WASM_OPCODE_I64_CONST : WASM_OPCODE_I32_CONST;
+  unsigned opcode_ptr_add = is64 ? WASM_OPCODE_I64_ADD : WASM_OPCODE_I32_ADD;
 
   uint64_t tombstone = getTombstone();
   // TODO(sbc): Encode the relocations in the data section and write a loop
@@ -544,14 +543,38 @@ uint64_t InputSection::getTombstoneForSection(StringRef name) {
     return UINT64_C(-2);
   if (name.starts_with(".debug_"))
     return UINT64_C(-1);
-  // If the function occurs in an function attribute section change it to -1 since
-  // 0 is a valid function index.
+  // If the function occurs in an function attribute section change it to -1
+  // since 0 is a valid function index.
   if (name.starts_with("llvm.func_attr."))
     return UINT64_C(-1);
-  // Returning 0 means there is no tombstone value for this section, and relocation
-  // will just use the addend.
+  // Returning 0 means there is no tombstone value for this section, and
+  // relocation will just use the addend.
   return 0;
 }
 
+InputMetadataSection::BranchHintMap
+InputMetadataSection::getBranchHints() const {
+  unsigned numBytesForEntries = 0;
+  uint32_t numEntries =
+      decodeULEB128(this->rawData.data(), &numBytesForEntries);
+  assert(getNumRelocations() == numEntries &&
+         "branch hints section requires one relocation per hint");
+
+  __attribute__((packed)) struct HintEntry {
+    uint32_t _;
+    uint8_t hint;
+  };
+  const auto *hints = llvm::bit_cast<const HintEntry *>(
+      this->rawData.slice(numBytesForEntries).data());
+  InputMetadataSection::BranchHintMap result;
+
+  for (uint32_t i = 0; i < numEntries; ++i) {
+    const unsigned offset = this->relocations[i].Addend;
+    const Symbol *funcSym = this->file->getSymbol(this->relocations[i].Index);
+    const uint32_t funcIdx = cast<DefinedFunction>(funcSym)->getFunctionIndex();
+    result[funcIdx].emplace_back(BranchHint{offset, hints[i].hint});
+  }
+  return result;
+}
 } // namespace wasm
 } // namespace lld

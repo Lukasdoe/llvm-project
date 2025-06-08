@@ -40,6 +40,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionWasm.h"
 #include "llvm/MC/MCStreamer.h"
@@ -229,8 +230,7 @@ MCSymbol *WebAssemblyAsmPrinter::getOrCreateWasmSymbol(StringRef Name) {
   if (Name == "__stack_pointer" || Name == "__tls_base" ||
       Name == "__memory_base" || Name == "__table_base" ||
       Name == "__tls_size" || Name == "__tls_align") {
-    bool Mutable =
-        Name == "__stack_pointer" || Name == "__tls_base";
+    bool Mutable = Name == "__stack_pointer" || Name == "__tls_base";
     WasmSym->setType(wasm::WASM_SYMBOL_TYPE_GLOBAL);
     WasmSym->setGlobalType(wasm::WasmGlobalType{
         uint8_t(Subtarget.hasAddr64() ? wasm::WASM_TYPE_I64
@@ -403,7 +403,7 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
     if (!F.isIntrinsic() && F.hasAddressTaken()) {
       MCSymbolWasm *FunctionTable =
           WebAssembly::getOrCreateFunctionTableSymbol(OutContext, Subtarget);
-      OutStreamer->emitSymbolAttribute(FunctionTable, MCSA_NoDeadStrip);    
+      OutStreamer->emitSymbolAttribute(FunctionTable, MCSA_NoDeadStrip);
       break;
     }
   }
@@ -441,6 +441,25 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   EmitProducerInfo(M);
   EmitTargetFeatures(M);
   EmitFunctionAttributes(M);
+
+  if (Subtarget->hasBranchHinting())
+    EmitBranchHintSection(M);
+}
+
+void WebAssemblyAsmPrinter::EmitBranchHintSection(Module &M) {
+  MCSectionWasm *BranchHintsSection = OutContext.getWasmSection(
+      "metadata.code.branch_hint", SectionKind::getMetadata());
+  OutStreamer->pushSection();
+  OutStreamer->switchSection(BranchHintsSection);
+  // should we emit empty branch hints section?
+  OutStreamer->emitULEB128IntValue(branchHints.size());
+  for (const auto &[sym, hint] : branchHints) {
+    const unsigned CPS = MAI->getCodePointerSize();
+    assert(CPS);
+    OutStreamer->emitSymbolValue(sym, CPS, false);
+    OutStreamer->emitInt8(hint);
+  }
+  OutStreamer->popSection();
 }
 
 void WebAssemblyAsmPrinter::EmitProducerInfo(Module &M) {
@@ -477,7 +496,7 @@ void WebAssemblyAsmPrinter::EmitProducerInfo(Module &M) {
     OutStreamer->switchSection(Producers);
     OutStreamer->emitULEB128IntValue(FieldCount);
     for (auto &Producers : {std::make_pair("language", &Languages),
-            std::make_pair("processed-by", &Tools)}) {
+                            std::make_pair("processed-by", &Tools)}) {
       if (Producers.second->empty())
         continue;
       OutStreamer->emitULEB128IntValue(strlen(Producers.first));
@@ -586,7 +605,8 @@ void WebAssemblyAsmPrinter::EmitFunctionAttributes(Module &M) {
   // Emit a custom section for each unique attribute.
   for (const auto &[Name, Symbols] : CustomSections) {
     MCSectionWasm *CustomSection = OutContext.getWasmSection(
-        ".custom_section.llvm.func_attr.annotate." + Name, SectionKind::getMetadata());
+        ".custom_section.llvm.func_attr.annotate." + Name,
+        SectionKind::getMetadata());
     OutStreamer->pushSection();
     OutStreamer->switchSection(CustomSection);
 
@@ -641,7 +661,6 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
   LLVM_DEBUG(dbgs() << "EmitInstruction: " << *MI << '\n');
   WebAssembly_MC::verifyInstructionPredicates(MI->getOpcode(),
                                               Subtarget->getFeatureBits());
-
   switch (MI->getOpcode()) {
   case WebAssembly::ARGUMENT_i32:
   case WebAssembly::ARGUMENT_i32_S:
@@ -696,6 +715,19 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
     WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
     MCInst TmpInst;
     MCInstLowering.lower(MI, TmpInst);
+    if (MI->getOpcode() == WebAssembly::BR_IF && MFI &&
+        MFI->BranchProbabilities.contains(MI)) {
+      MCSymbol *BrIfSym = OutContext.createTempSymbol();
+      OutStreamer->emitLabel(BrIfSym);
+
+      constexpr uint8_t HintLikely = 0x01;
+      constexpr uint8_t HintUnlikely = 0x00;
+      const BranchProbability &Prob = MFI->BranchProbabilities[MI];
+      const uint8_t HintValue =
+          Prob > (BranchProbability::getOne() / 2) ? HintLikely : HintUnlikely;
+
+      branchHints[BrIfSym] = HintValue;
+    }
     EmitToStreamer(*OutStreamer, TmpInst);
     break;
   }

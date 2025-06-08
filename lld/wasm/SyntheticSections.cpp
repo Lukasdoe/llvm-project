@@ -430,10 +430,9 @@ void GlobalSection::addInternalGOTEntry(Symbol *sym) {
 void GlobalSection::generateRelocationCode(raw_ostream &os, bool TLS) const {
   assert(!ctx.arg.extendedConst);
   bool is64 = ctx.arg.is64.value_or(false);
-  unsigned opcode_ptr_const = is64 ? WASM_OPCODE_I64_CONST
-                                   : WASM_OPCODE_I32_CONST;
-  unsigned opcode_ptr_add = is64 ? WASM_OPCODE_I64_ADD
-                                 : WASM_OPCODE_I32_ADD;
+  unsigned opcode_ptr_const =
+      is64 ? WASM_OPCODE_I64_CONST : WASM_OPCODE_I32_CONST;
+  unsigned opcode_ptr_add = is64 ? WASM_OPCODE_I64_ADD : WASM_OPCODE_I32_ADD;
 
   for (const Symbol *sym : internalGotSymbols) {
     if (TLS != sym->isTLS())
@@ -614,7 +613,7 @@ void ElemSection::writeBody() {
   uint32_t tableIndex = ctx.arg.tableBase;
   for (const FunctionSymbol *sym : indirectFunctions) {
     assert(sym->getTableIndex() == tableIndex);
-    (void) tableIndex;
+    (void)tableIndex;
     writeUleb128(os, sym->getFunctionIndex(), "function index");
     ++tableIndex;
   }
@@ -960,4 +959,40 @@ void BuildIdSection::writeBuildId(llvm::ArrayRef<uint8_t> buf) {
   memcpy(hashPlaceholderPtr, buf.data(), hashSize);
 }
 
-} // namespace wasm::lld
+void BranchHintMetadataSection::writeBody() {
+  raw_ostream &os = bodyOutputStream;
+  writeStr(os, "metadata.code.branch_hint", "custom section name");
+  writeUleb128(os, collectedHints.size(), "vec size codemetadatafunc");
+  for (const auto &[funcIdx, funcHints] : collectedHints) {
+    writeUleb128(os, funcIdx, "function index");
+    writeUleb128(os, funcHints.size(), "num func hints");
+    for (const auto &hint : funcHints) {
+      writeUleb128(os, hint.instructionOffset, "instr offset");
+      writeUleb128(os, 1, "hint size");
+      writeUleb128(os, hint.hintValue, "hint");
+    }
+  }
+}
+
+BranchHintMetadataSection::BranchHintMetadataSection(
+    ArrayRef<OutputSegment *> segments)
+    : SyntheticSection(WASM_SEC_CUSTOM, "metadata.code.branch_hint"),
+      segments(segments) {
+  // scan custom sections
+  for (const auto &a : ctx.objectFiles) {
+    for (const auto &b : a->customSections) {
+      if (const auto *MDS = dyn_cast_or_null<InputMetadataSection>(b)) {
+        assert(!MDS->discarded);
+        InputMetadataSection::BranchHintMap hints = MDS->getBranchHints();
+        for (const auto &[funcIdx, funcHints] : hints) {
+          // merge hints
+          auto &collected = collectedHints[funcIdx];
+          for (const auto &hint : funcHints) {
+            collected.emplace_back(InstrHint{hint.offset, hint.hint});
+          }
+        }
+      }
+    }
+  }
+}
+} // namespace lld::wasm

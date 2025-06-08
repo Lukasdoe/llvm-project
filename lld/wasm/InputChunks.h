@@ -45,6 +45,7 @@ public:
     Function,
     SyntheticFunction,
     Section,
+    BranchHintMetadataSection,
   };
 
   StringRef name;
@@ -357,6 +358,30 @@ public:
 protected:
   static uint64_t getTombstoneForSection(StringRef name);
   const WasmSection &section;
+};
+
+class InputMetadataSection : public InputChunk {
+  bool someVal = true;
+
+public:
+  InputMetadataSection(const WasmSection &s, ObjFile *f, uint32_t alignment)
+      : InputChunk(f, InputChunk::BranchHintMetadataSection, s.Name,
+                   alignment) {
+    assert(s.Type == llvm::wasm::WASM_SEC_CUSTOM);
+    rawData = s.Content;
+  }
+
+  static bool classof(const InputChunk *c) {
+    return c->kind() == InputChunk::BranchHintMetadataSection;
+  }
+
+  struct BranchHint {
+    uint32_t offset;
+    uint8_t hint;
+  };
+  // function index -> vector of branch hints
+  using BranchHintMap = llvm::DenseMap<uint32_t, SmallVector<BranchHint>>;
+  BranchHintMap getBranchHints() const;
 };
 
 } // namespace wasm

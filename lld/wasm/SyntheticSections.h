@@ -125,7 +125,7 @@ inline bool operator==(const ImportKey<T> &lhs, const ImportKey<T> &rhs) {
          lhs.importName == rhs.importName && lhs.type == rhs.type;
 }
 
-} // namespace wasm::lld
+} // namespace lld::wasm
 
 // `ImportKey<T>` can be used as a key in a `DenseMap` if `T` can be used as a
 // key in a `DenseMap`.
@@ -324,8 +324,7 @@ public:
 
 class ElemSection : public SyntheticSection {
 public:
-  ElemSection()
-      : SyntheticSection(llvm::wasm::WASM_SEC_ELEM) {}
+  ElemSection() : SyntheticSection(llvm::wasm::WASM_SEC_ELEM) {}
   bool isNeeded() const override { return indirectFunctions.size() > 0; };
   void writeBody() override;
   void addEntry(FunctionSymbol *sym);
@@ -467,6 +466,28 @@ private:
   uint8_t *hashPlaceholderPtr = nullptr;
 };
 
+class BranchHintMetadataSection : public SyntheticSection {
+public:
+  BranchHintMetadataSection(ArrayRef<OutputSegment *> segments);
+  bool isNeeded() const override { return !collectedHints.empty(); }
+  void writeBody() override;
+
+private:
+  ArrayRef<OutputSegment *> segments;
+
+  struct InstrHint {
+    uint32_t instructionOffset;
+    uint8_t hintValue;
+  };
+  llvm::DenseMap<uint32_t, SmallVector<InstrHint>> collectedHints;
+
+  void addHint(const uint32_t functionIndex, const uint32_t offset,
+               const uint8_t hint) {
+    assert(hint == 0 || hint == 1);
+    collectedHints[functionIndex].push_back({offset, hint});
+  }
+};
+
 // Linker generated output sections
 struct OutStruct {
   DylinkSection *dylinkSec;
@@ -486,6 +507,7 @@ struct OutStruct {
   ProducersSection *producersSec;
   TargetFeaturesSection *targetFeaturesSec;
   BuildIdSection *buildIdSec;
+  BranchHintMetadataSection *codeMetadataSec;
 };
 
 extern OutStruct out;

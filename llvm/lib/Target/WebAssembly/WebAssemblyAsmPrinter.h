@@ -27,6 +27,8 @@ private:
   const MachineRegisterInfo *MRI;
   WebAssemblyFunctionInfo *MFI;
   bool signaturesEmitted = false;
+  // instr_label -> branch_hint
+  DenseMap<MCSymbol*, uint8_t> branchHints;
 
 public:
   explicit WebAssemblyAsmPrinter(TargetMachine &TM,
@@ -59,6 +61,7 @@ public:
   void EmitProducerInfo(Module &M);
   void EmitTargetFeatures(Module &M);
   void EmitFunctionAttributes(Module &M);
+  void EmitBranchHintSection(Module &M);
   void emitSymbolType(const MCSymbolWasm *Sym);
   void emitGlobalVariable(const GlobalVariable *GV) override;
   void emitJumpTableInfo() override;
