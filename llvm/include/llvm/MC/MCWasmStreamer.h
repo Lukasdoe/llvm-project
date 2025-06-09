@@ -50,6 +50,8 @@ public:
   void emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                         Align ByteAlignment) override;
 
+  void emitULEB128Value(const MCExpr *Value) override;
+
   void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
 
   void emitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,

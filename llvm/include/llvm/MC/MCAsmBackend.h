@@ -63,6 +63,11 @@ public:
   /// tricky way for optimization.
   virtual bool allowEnhancedRelaxation() const { return false; }
 
+  /// Return true if this target allows non-absolute leb128 fragments that require
+  /// relocations to be emitted. This is currently only used by WebAssembly which
+  /// uses leb128 for symbol value encoding.
+  virtual bool shouldPreserveLEBFragmentForRelocation(MCLEBFragment&) const { return false; }
+
   /// lifetime management
   virtual void reset() {}
 

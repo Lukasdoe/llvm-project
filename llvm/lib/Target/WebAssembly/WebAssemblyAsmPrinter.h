@@ -28,6 +28,9 @@ private:
   WebAssemblyFunctionInfo *MFI;
   bool signaturesEmitted = false;
 
+  // func_idx -> [(instr_sym, branch_hint)]
+  DenseMap<MCSymbol*, SmallVector<std::pair<MCSymbol*, uint8_t>>> branchHints;
+
 public:
   explicit WebAssemblyAsmPrinter(TargetMachine &TM,
                                  std::unique_ptr<MCStreamer> Streamer)
@@ -59,6 +62,7 @@ public:
   void EmitProducerInfo(Module &M);
   void EmitTargetFeatures(Module &M);
   void EmitFunctionAttributes(Module &M);
+  void EmitBranchHintSection(Module &M);
   void emitSymbolType(const MCSymbolWasm *Sym);
   void emitGlobalVariable(const GlobalVariable *GV) override;
   void emitJumpTableInfo() override;

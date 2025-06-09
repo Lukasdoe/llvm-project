@@ -25,6 +25,7 @@
 #include "WebAssemblyRegisterInfo.h"
 #include "WebAssemblyRuntimeLibcallSignatures.h"
 #include "WebAssemblyUtilities.h"
+#include "llvm/MC/MCWasmStreamer.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringExtras.h"
@@ -40,6 +41,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionWasm.h"
 #include "llvm/MC/MCStreamer.h"
@@ -62,8 +64,10 @@ extern cl::opt<bool> WasmKeepRegisters;
 MVT WebAssemblyAsmPrinter::getRegType(unsigned RegNo) const {
   const TargetRegisterInfo *TRI = Subtarget->getRegisterInfo();
   const TargetRegisterClass *TRC = MRI->getRegClass(RegNo);
-  for (MVT T : {MVT::i32, MVT::i64, MVT::f32, MVT::f64, MVT::v16i8, MVT::v8i16,
-                MVT::v4i32, MVT::v2i64, MVT::v4f32, MVT::v2f64, MVT::v8f16})
+  for (MVT T: {
+         MVT::i32, MVT::i64, MVT::f32, MVT::f64, MVT::v16i8, MVT::v8i16,
+         MVT::v4i32, MVT::v2i64, MVT::v4f32, MVT::v2f64, MVT::v8f16
+       })
     if (TRI->isTypeLegalForClass(*TRC, T))
       return T;
   LLVM_DEBUG(errs() << "Unknown type for register number: " << RegNo);
@@ -74,7 +78,7 @@ MVT WebAssemblyAsmPrinter::getRegType(unsigned RegNo) const {
 std::string WebAssemblyAsmPrinter::regToString(const MachineOperand &MO) {
   Register RegNo = MO.getReg();
   assert(RegNo.isVirtual() &&
-         "Unlowered physical register encountered during assembly printing");
+    "Unlowered physical register encountered during assembly printing");
   assert(!MFI->isVRegStackified(RegNo));
   unsigned WAReg = MFI->getWAReg(RegNo);
   assert(WAReg != WebAssembly::UnusedReg);
@@ -112,24 +116,24 @@ static bool isEmscriptenInvokeName(StringRef Name) {
 // signatures.
 static char getInvokeSig(wasm::ValType VT) {
   switch (VT) {
-  case wasm::ValType::I32:
-    return 'i';
-  case wasm::ValType::I64:
-    return 'j';
-  case wasm::ValType::F32:
-    return 'f';
-  case wasm::ValType::F64:
-    return 'd';
-  case wasm::ValType::V128:
-    return 'V';
-  case wasm::ValType::FUNCREF:
-    return 'F';
-  case wasm::ValType::EXTERNREF:
-    return 'X';
-  case wasm::ValType::EXNREF:
-    return 'E';
-  default:
-    llvm_unreachable("Unhandled wasm::ValType enum");
+    case wasm::ValType::I32:
+      return 'i';
+    case wasm::ValType::I64:
+      return 'j';
+    case wasm::ValType::F32:
+      return 'f';
+    case wasm::ValType::F64:
+      return 'd';
+    case wasm::ValType::V128:
+      return 'V';
+    case wasm::ValType::FUNCREF:
+      return 'F';
+    case wasm::ValType::EXTERNREF:
+      return 'X';
+    case wasm::ValType::EXNREF:
+      return 'E';
+    default:
+      llvm_unreachable("Unhandled wasm::ValType enum");
   }
 }
 
@@ -139,7 +143,7 @@ static std::string getEmscriptenInvokeSymbolName(wasm::WasmSignature *Sig) {
   assert(Sig->Returns.size() <= 1);
   std::string Ret = "invoke_";
   if (!Sig->Returns.empty())
-    for (auto VT : Sig->Returns)
+    for (auto VT: Sig->Returns)
       Ret += getInvokeSig(VT);
   else
     Ret += 'v';
@@ -154,8 +158,8 @@ static std::string getEmscriptenInvokeSymbolName(wasm::WasmSignature *Sig) {
 //===----------------------------------------------------------------------===//
 
 MCSymbolWasm *WebAssemblyAsmPrinter::getMCSymbolForFunction(
-    const Function *F, bool EnableEmEH, wasm::WasmSignature *Sig,
-    bool &InvokeDetected) {
+  const Function *F, bool EnableEmEH, wasm::WasmSignature *Sig,
+  bool &InvokeDetected) {
   MCSymbolWasm *WasmSym = nullptr;
   if (EnableEmEH && isEmscriptenInvokeName(F->getName())) {
     assert(Sig);
@@ -168,7 +172,7 @@ MCSymbolWasm *WebAssemblyAsmPrinter::getMCSymbolForFunction(
       report_fatal_error(Twine(Msg));
     }
     WasmSym = cast<MCSymbolWasm>(
-        GetExternalSymbolSymbol(getEmscriptenInvokeSymbolName(Sig)));
+      GetExternalSymbolSymbol(getEmscriptenInvokeSymbolName(Sig)));
   } else {
     WasmSym = cast<MCSymbolWasm>(getSymbol(F));
   }
@@ -229,13 +233,14 @@ MCSymbol *WebAssemblyAsmPrinter::getOrCreateWasmSymbol(StringRef Name) {
   if (Name == "__stack_pointer" || Name == "__tls_base" ||
       Name == "__memory_base" || Name == "__table_base" ||
       Name == "__tls_size" || Name == "__tls_align") {
-    bool Mutable =
-        Name == "__stack_pointer" || Name == "__tls_base";
+    bool Mutable = Name == "__stack_pointer" || Name == "__tls_base";
     WasmSym->setType(wasm::WASM_SYMBOL_TYPE_GLOBAL);
     WasmSym->setGlobalType(wasm::WasmGlobalType{
-        uint8_t(Subtarget.hasAddr64() ? wasm::WASM_TYPE_I64
-                                      : wasm::WASM_TYPE_I32),
-        Mutable});
+      uint8_t(Subtarget.hasAddr64()
+                ? wasm::WASM_TYPE_I64
+                : wasm::WASM_TYPE_I32),
+      Mutable
+    });
     return WasmSym;
   }
 
@@ -265,7 +270,8 @@ MCSymbol *WebAssemblyAsmPrinter::getOrCreateWasmSymbol(StringRef Name) {
     wasm::ValType AddrType =
         Subtarget.hasAddr64() ? wasm::ValType::I64 : wasm::ValType::I32;
     Params.push_back(AddrType);
-  } else { // Function symbols
+  } else {
+    // Function symbols
     WasmSym->setType(wasm::WASM_SYMBOL_TYPE_FUNCTION);
     WebAssembly::getLibcallSignature(Subtarget, Name, Returns, Params);
   }
@@ -283,17 +289,17 @@ void WebAssemblyAsmPrinter::emitSymbolType(const MCSymbolWasm *Sym) {
     return;
 
   switch (*WasmTy) {
-  case wasm::WASM_SYMBOL_TYPE_GLOBAL:
-    getTargetStreamer()->emitGlobalType(Sym);
-    break;
-  case wasm::WASM_SYMBOL_TYPE_TAG:
-    getTargetStreamer()->emitTagType(Sym);
-    break;
-  case wasm::WASM_SYMBOL_TYPE_TABLE:
-    getTargetStreamer()->emitTableType(Sym);
-    break;
-  default:
-    break; // We only handle globals, tags and tables here
+    case wasm::WASM_SYMBOL_TYPE_GLOBAL:
+      getTargetStreamer()->emitGlobalType(Sym);
+      break;
+    case wasm::WASM_SYMBOL_TYPE_TAG:
+      getTargetStreamer()->emitTagType(Sym);
+      break;
+    case wasm::WASM_SYMBOL_TYPE_TABLE:
+      getTargetStreamer()->emitTableType(Sym);
+      break;
+    default:
+      break; // We only handle globals, tags and tables here
   }
 }
 
@@ -307,7 +313,7 @@ void WebAssemblyAsmPrinter::emitDecls(const Module &M) {
   // only find symbols that have been used. Unused symbols from globals will
   // not be found here.
   MachineModuleInfoWasm &MMIW = MMI->getObjFileInfo<MachineModuleInfoWasm>();
-  for (StringRef Name : MMIW.MachineSymbolsUsed) {
+  for (StringRef Name: MMIW.MachineSymbolsUsed) {
     auto *WasmSym = cast<MCSymbolWasm>(getOrCreateWasmSymbol(Name));
     if (WasmSym->isFunction()) {
       // TODO(wvo): is there any case where this overlaps with the call to
@@ -316,7 +322,7 @@ void WebAssemblyAsmPrinter::emitDecls(const Module &M) {
     }
   }
 
-  for (auto &It : OutContext.getSymbols()) {
+  for (auto &It: OutContext.getSymbols()) {
     // Emit .globaltype, .tagtype, or .tabletype declarations for extern
     // declarations, i.e. those that have only been declared (but not defined)
     // in the current module
@@ -326,7 +332,7 @@ void WebAssemblyAsmPrinter::emitDecls(const Module &M) {
   }
 
   DenseSet<MCSymbol *> InvokeSymbols;
-  for (const auto &F : M) {
+  for (const auto &F: M) {
     if (F.isIntrinsic())
       continue;
 
@@ -344,8 +350,8 @@ void WebAssemblyAsmPrinter::emitDecls(const Module &M) {
     auto Signature = signatureFromMVTs(OutContext, Results, Params);
     bool InvokeDetected = false;
     auto *Sym = getMCSymbolForFunction(
-        &F, WebAssembly::WasmEnableEmEH || WebAssembly::WasmEnableEmSjLj,
-        Signature, InvokeDetected);
+      &F, WebAssembly::WasmEnableEmEH || WebAssembly::WasmEnableEmSjLj,
+      Signature, InvokeDetected);
 
     // Multiple functions can be mapped to the same invoke symbol. For
     // example, two IR functions '__invoke_void_i8*' and '__invoke_void_i32'
@@ -372,8 +378,8 @@ void WebAssemblyAsmPrinter::emitDecls(const Module &M) {
       // the original function name but the converted symbol name.
       StringRef Name =
           InvokeDetected
-              ? Sym->getName()
-              : F.getFnAttribute("wasm-import-name").getValueAsString();
+            ? Sym->getName()
+            : F.getFnAttribute("wasm-import-name").getValueAsString();
       Sym->setImportName(OutContext.allocateString(Name));
       getTargetStreamer()->emitImportName(Sym, Name);
     }
@@ -399,16 +405,16 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   // define a new kind of reloc against both the function and the table, so
   // that the linker can see that the function symbol keeps the table alive,
   // but for now manually mark the table as live.
-  for (const auto &F : M) {
+  for (const auto &F: M) {
     if (!F.isIntrinsic() && F.hasAddressTaken()) {
       MCSymbolWasm *FunctionTable =
           WebAssembly::getOrCreateFunctionTableSymbol(OutContext, Subtarget);
-      OutStreamer->emitSymbolAttribute(FunctionTable, MCSA_NoDeadStrip);    
+      OutStreamer->emitSymbolAttribute(FunctionTable, MCSA_NoDeadStrip);
       break;
     }
   }
 
-  for (const auto &G : M.globals()) {
+  for (const auto &G: M.globals()) {
     if (!G.hasInitializer() && G.hasExternalLinkage() &&
         !WebAssembly::isWasmVarAddressSpace(G.getAddressSpace()) &&
         G.getValueType()->isSized()) {
@@ -419,7 +425,7 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   }
 
   if (const NamedMDNode *Named = M.getNamedMetadata("wasm.custom_sections")) {
-    for (const Metadata *MD : Named->operands()) {
+    for (const Metadata *MD: Named->operands()) {
       const auto *Tuple = dyn_cast<MDTuple>(MD);
       if (!Tuple || Tuple->getNumOperands() != 2)
         continue;
@@ -441,6 +447,38 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   EmitProducerInfo(M);
   EmitTargetFeatures(M);
   EmitFunctionAttributes(M);
+
+  if (Subtarget->hasBranchHinting())
+    EmitBranchHintSection(M);
+}
+
+void WebAssemblyAsmPrinter::EmitBranchHintSection(Module &M) {
+  MCSectionWasm *BranchHintsSection = OutContext.getWasmSection(
+    "metadata.code.branch_hint", SectionKind::getMetadata());
+  OutStreamer->pushSection();
+  OutStreamer->switchSection(BranchHintsSection);
+  // should we emit empty branch hints section?
+  OutStreamer->emitULEB128IntValue(branchHints.size());
+
+  for (const auto &[funcSym, hints]: branchHints) {
+    // emit relocatable function index for the function symbol
+    // cast<WebAssemblyTargetStreamer>(OutStreamer->getTargetStreamer())->emitULEB128Symbol(cast<MCSymbolWasm>(funcSym));
+    OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(funcSym, WebAssembly::S_None, OutContext));
+    // getTargetStreamer()->emitULEB128FuncIdx(cast<MCSymbolWasm>(funcSym));
+    // OutStreamer->emitRelocDirective(*MCConstantExpr::create(0, OutContext), "FK_Data_leb128", MCSymbolRefExpr::create(funcSym, WebAssembly::S_None, OutContext), SMLoc(), *OutContext.getSubtargetInfo());
+
+    // emit the number of hints for this function
+    OutStreamer->emitULEB128IntValue(hints.size());
+    for (const auto &[instrSym, hint]: hints) {
+      assert(hint == 0 || hint == 1);
+      // offset from function start
+      OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(instrSym, OutContext));
+      // cast<WebAssemblyTargetStreamer>(OutStreamer->getTargetStreamer())->emitULEB128Symbol(cast<MCSymbolWasm>(funcSym));
+      OutStreamer->emitULEB128IntValue(1); // hint size
+      OutStreamer->emitULEB128IntValue(hint);
+    }
+  }
+  OutStreamer->popSection();
 }
 
 void WebAssemblyAsmPrinter::EmitProducerInfo(Module &M) {
@@ -472,18 +510,20 @@ void WebAssemblyAsmPrinter::EmitProducerInfo(Module &M) {
   int FieldCount = int(!Languages.empty()) + int(!Tools.empty());
   if (FieldCount != 0) {
     MCSectionWasm *Producers = OutContext.getWasmSection(
-        ".custom_section.producers", SectionKind::getMetadata());
+      ".custom_section.producers", SectionKind::getMetadata());
     OutStreamer->pushSection();
     OutStreamer->switchSection(Producers);
     OutStreamer->emitULEB128IntValue(FieldCount);
-    for (auto &Producers : {std::make_pair("language", &Languages),
-            std::make_pair("processed-by", &Tools)}) {
+    for (auto &Producers: {
+           std::make_pair("language", &Languages),
+           std::make_pair("processed-by", &Tools)
+         }) {
       if (Producers.second->empty())
         continue;
       OutStreamer->emitULEB128IntValue(strlen(Producers.first));
       OutStreamer->emitBytes(Producers.first);
       OutStreamer->emitULEB128IntValue(Producers.second->size());
-      for (auto &Producer : *Producers.second) {
+      for (auto &Producer: *Producers.second) {
         OutStreamer->emitULEB128IntValue(Producer.first.size());
         OutStreamer->emitBytes(Producer.first);
         OutStreamer->emitULEB128IntValue(Producer.second.size());
@@ -524,7 +564,7 @@ void WebAssemblyAsmPrinter::EmitTargetFeatures(Module &M) {
     EmittedFeatures.push_back(Entry);
   };
 
-  for (const SubtargetFeatureKV &KV : WebAssemblyFeatureKV) {
+  for (const SubtargetFeatureKV &KV: WebAssemblyFeatureKV) {
     EmitFeature(KV.Key);
   }
   // This pseudo-feature tells the linker whether shared memory would be safe
@@ -544,12 +584,12 @@ void WebAssemblyAsmPrinter::EmitTargetFeatures(Module &M) {
 
   // Emit features and linkage policies into the "target_features" section
   MCSectionWasm *FeaturesSection = OutContext.getWasmSection(
-      ".custom_section.target_features", SectionKind::getMetadata());
+    ".custom_section.target_features", SectionKind::getMetadata());
   OutStreamer->pushSection();
   OutStreamer->switchSection(FeaturesSection);
 
   OutStreamer->emitULEB128IntValue(EmittedFeatures.size());
-  for (auto &F : EmittedFeatures) {
+  for (auto &F: EmittedFeatures) {
     OutStreamer->emitIntValue(F.Prefix, 1);
     OutStreamer->emitULEB128IntValue(F.Name.size());
     OutStreamer->emitBytes(F.Name);
@@ -564,9 +604,9 @@ void WebAssemblyAsmPrinter::EmitFunctionAttributes(Module &M) {
     return;
 
   // Group all the custom attributes by name.
-  MapVector<StringRef, SmallVector<MCSymbol *, 4>> CustomSections;
+  MapVector<StringRef, SmallVector<MCSymbol *, 4> > CustomSections;
   const ConstantArray *CA = cast<ConstantArray>(V->getOperand(0));
-  for (Value *Op : CA->operands()) {
+  for (Value *Op: CA->operands()) {
     auto *CS = cast<ConstantStruct>(Op);
     // The first field is a pointer to the annotated variable.
     Value *AnnotatedVar = CS->getOperand(0)->stripPointerCasts();
@@ -584,16 +624,17 @@ void WebAssemblyAsmPrinter::EmitFunctionAttributes(Module &M) {
   }
 
   // Emit a custom section for each unique attribute.
-  for (const auto &[Name, Symbols] : CustomSections) {
+  for (const auto &[Name, Symbols]: CustomSections) {
     MCSectionWasm *CustomSection = OutContext.getWasmSection(
-        ".custom_section.llvm.func_attr.annotate." + Name, SectionKind::getMetadata());
+      ".custom_section.llvm.func_attr.annotate." + Name,
+      SectionKind::getMetadata());
     OutStreamer->pushSection();
     OutStreamer->switchSection(CustomSection);
 
-    for (auto &Sym : Symbols) {
+    for (auto &Sym: Symbols) {
       OutStreamer->emitValue(
-          MCSymbolRefExpr::create(Sym, WebAssembly::S_FUNCINDEX, OutContext),
-          4);
+        MCSymbolRefExpr::create(Sym, WebAssembly::S_FUNCINDEX, OutContext),
+        4);
     }
     OutStreamer->popSection();
   }
@@ -602,7 +643,7 @@ void WebAssemblyAsmPrinter::EmitFunctionAttributes(Module &M) {
 void WebAssemblyAsmPrinter::emitConstantPool() {
   emitDecls(*MMI->getModule());
   assert(MF->getConstantPool()->getConstants().empty() &&
-         "WebAssembly disables constant pools");
+    "WebAssembly disables constant pools");
 }
 
 void WebAssemblyAsmPrinter::emitJumpTableInfo() {
@@ -627,7 +668,7 @@ void WebAssemblyAsmPrinter::emitFunctionBodyStart() {
     assert(Idx->getNumOperands() == 1);
 
     getTargetStreamer()->emitIndIdx(AsmPrinter::lowerConstant(
-        cast<ConstantAsMetadata>(Idx->getOperand(0))->getValue()));
+      cast<ConstantAsMetadata>(Idx->getOperand(0))->getValue()));
   }
 
   SmallVector<wasm::ValType, 16> Locals;
@@ -641,64 +682,79 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
   LLVM_DEBUG(dbgs() << "EmitInstruction: " << *MI << '\n');
   WebAssembly_MC::verifyInstructionPredicates(MI->getOpcode(),
                                               Subtarget->getFeatureBits());
-
   switch (MI->getOpcode()) {
-  case WebAssembly::ARGUMENT_i32:
-  case WebAssembly::ARGUMENT_i32_S:
-  case WebAssembly::ARGUMENT_i64:
-  case WebAssembly::ARGUMENT_i64_S:
-  case WebAssembly::ARGUMENT_f32:
-  case WebAssembly::ARGUMENT_f32_S:
-  case WebAssembly::ARGUMENT_f64:
-  case WebAssembly::ARGUMENT_f64_S:
-  case WebAssembly::ARGUMENT_v16i8:
-  case WebAssembly::ARGUMENT_v16i8_S:
-  case WebAssembly::ARGUMENT_v8i16:
-  case WebAssembly::ARGUMENT_v8i16_S:
-  case WebAssembly::ARGUMENT_v4i32:
-  case WebAssembly::ARGUMENT_v4i32_S:
-  case WebAssembly::ARGUMENT_v2i64:
-  case WebAssembly::ARGUMENT_v2i64_S:
-  case WebAssembly::ARGUMENT_v4f32:
-  case WebAssembly::ARGUMENT_v4f32_S:
-  case WebAssembly::ARGUMENT_v2f64:
-  case WebAssembly::ARGUMENT_v2f64_S:
-  case WebAssembly::ARGUMENT_v8f16:
-  case WebAssembly::ARGUMENT_v8f16_S:
-    // These represent values which are live into the function entry, so there's
-    // no instruction to emit.
-    break;
-  case WebAssembly::FALLTHROUGH_RETURN: {
-    // These instructions represent the implicit return at the end of a
-    // function body.
-    if (isVerbose()) {
-      OutStreamer->AddComment("fallthrough-return");
-      OutStreamer->addBlankLine();
+    case WebAssembly::ARGUMENT_i32:
+    case WebAssembly::ARGUMENT_i32_S:
+    case WebAssembly::ARGUMENT_i64:
+    case WebAssembly::ARGUMENT_i64_S:
+    case WebAssembly::ARGUMENT_f32:
+    case WebAssembly::ARGUMENT_f32_S:
+    case WebAssembly::ARGUMENT_f64:
+    case WebAssembly::ARGUMENT_f64_S:
+    case WebAssembly::ARGUMENT_v16i8:
+    case WebAssembly::ARGUMENT_v16i8_S:
+    case WebAssembly::ARGUMENT_v8i16:
+    case WebAssembly::ARGUMENT_v8i16_S:
+    case WebAssembly::ARGUMENT_v4i32:
+    case WebAssembly::ARGUMENT_v4i32_S:
+    case WebAssembly::ARGUMENT_v2i64:
+    case WebAssembly::ARGUMENT_v2i64_S:
+    case WebAssembly::ARGUMENT_v4f32:
+    case WebAssembly::ARGUMENT_v4f32_S:
+    case WebAssembly::ARGUMENT_v2f64:
+    case WebAssembly::ARGUMENT_v2f64_S:
+    case WebAssembly::ARGUMENT_v8f16:
+    case WebAssembly::ARGUMENT_v8f16_S:
+      // These represent values which are live into the function entry, so there's
+      // no instruction to emit.
+      break;
+    case WebAssembly::FALLTHROUGH_RETURN: {
+      // These instructions represent the implicit return at the end of a
+      // function body.
+      if (isVerbose()) {
+        OutStreamer->AddComment("fallthrough-return");
+        OutStreamer->addBlankLine();
+      }
+      break;
     }
-    break;
-  }
-  case WebAssembly::COMPILER_FENCE:
-    // This is a compiler barrier that prevents instruction reordering during
-    // backend compilation, and should not be emitted.
-    break;
-  case WebAssembly::CATCH:
-  case WebAssembly::CATCH_S:
-  case WebAssembly::CATCH_REF:
-  case WebAssembly::CATCH_REF_S:
-  case WebAssembly::CATCH_ALL:
-  case WebAssembly::CATCH_ALL_S:
-  case WebAssembly::CATCH_ALL_REF:
-  case WebAssembly::CATCH_ALL_REF_S:
-    // These are pseudo instructions to represent catch clauses in try_table
-    // instruction to simulate block return values.
-    break;
-  default: {
-    WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
-    MCInst TmpInst;
-    MCInstLowering.lower(MI, TmpInst);
-    EmitToStreamer(*OutStreamer, TmpInst);
-    break;
-  }
+    case WebAssembly::COMPILER_FENCE:
+      // This is a compiler barrier that prevents instruction reordering during
+      // backend compilation, and should not be emitted.
+      break;
+    case WebAssembly::CATCH:
+    case WebAssembly::CATCH_S:
+    case WebAssembly::CATCH_REF:
+    case WebAssembly::CATCH_REF_S:
+    case WebAssembly::CATCH_ALL:
+    case WebAssembly::CATCH_ALL_S:
+    case WebAssembly::CATCH_ALL_REF:
+    case WebAssembly::CATCH_ALL_REF_S:
+      // These are pseudo instructions to represent catch clauses in try_table
+      // instruction to simulate block return values.
+      break;
+    default: {
+      WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
+      MCInst TmpInst;
+      MCInstLowering.lower(MI, TmpInst);
+      if (MI->getOpcode() == WebAssembly::BR_IF && MFI &&
+          MFI->BranchProbabilities.contains(MI)) {
+        MCSymbol *BrIfSym = OutContext.createTempSymbol();
+        OutStreamer->emitLabel(BrIfSym);
+
+        constexpr uint8_t HintLikely = 0x01;
+        constexpr uint8_t HintUnlikely = 0x00;
+        const BranchProbability &Prob = MFI->BranchProbabilities[MI];
+        const uint8_t HintValue =
+            Prob > (BranchProbability::getOne() / 2) ? HintLikely : HintUnlikely;
+
+        // we know that we only emit branch hints for internal functions, therefore we can directly cast
+        // and don't need getMCSymbolForFunction
+        MCSymbol *FuncSym = cast<MCSymbolWasm>(getSymbol(&MF->getFunction()));
+        branchHints[FuncSym].emplace_back(BrIfSym, HintValue);
+      }
+      EmitToStreamer(*OutStreamer, TmpInst);
+      break;
+    }
   }
 }
 
@@ -713,27 +769,27 @@ bool WebAssemblyAsmPrinter::PrintAsmOperand(const MachineInstr *MI,
   if (!ExtraCode) {
     const MachineOperand &MO = MI->getOperand(OpNo);
     switch (MO.getType()) {
-    case MachineOperand::MO_Immediate:
-      OS << MO.getImm();
-      return false;
-    case MachineOperand::MO_Register:
-      // FIXME: only opcode that still contains registers, as required by
-      // MachineInstr::getDebugVariable().
-      assert(MI->getOpcode() == WebAssembly::INLINEASM);
-      OS << regToString(MO);
-      return false;
-    case MachineOperand::MO_GlobalAddress:
-      PrintSymbolOperand(MO, OS);
-      return false;
-    case MachineOperand::MO_ExternalSymbol:
-      GetExternalSymbolSymbol(MO.getSymbolName())->print(OS, MAI);
-      printOffset(MO.getOffset(), OS);
-      return false;
-    case MachineOperand::MO_MachineBasicBlock:
-      MO.getMBB()->getSymbol()->print(OS, MAI);
-      return false;
-    default:
-      break;
+      case MachineOperand::MO_Immediate:
+        OS << MO.getImm();
+        return false;
+      case MachineOperand::MO_Register:
+        // FIXME: only opcode that still contains registers, as required by
+        // MachineInstr::getDebugVariable().
+        assert(MI->getOpcode() == WebAssembly::INLINEASM);
+        OS << regToString(MO);
+        return false;
+      case MachineOperand::MO_GlobalAddress:
+        PrintSymbolOperand(MO, OS);
+        return false;
+      case MachineOperand::MO_ExternalSymbol:
+        GetExternalSymbolSymbol(MO.getSymbolName())->print(OS, MAI);
+        printOffset(MO.getOffset(), OS);
+        return false;
+      case MachineOperand::MO_MachineBasicBlock:
+        MO.getMBB()->getSymbol()->print(OS, MAI);
+        return false;
+      default:
+        break;
     }
   }
 

@@ -114,6 +114,8 @@ unsigned WebAssemblyWasmObjectWriter::getRelocType(
       return wasm::R_WASM_TAG_INDEX_LEB;
     if (SymA.isTable())
       return wasm::R_WASM_TABLE_NUMBER_LEB;
+    if (SymA.isInSection() && SymA.getSection().isText())
+      return wasm::R_WASM_FUNCTION_OFFSET_LEB;
     return wasm::R_WASM_MEMORY_ADDR_LEB;
   case WebAssembly::fixup_uleb128_i64:
     assert(SymA.isData());

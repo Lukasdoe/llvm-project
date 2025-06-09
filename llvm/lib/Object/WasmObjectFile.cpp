@@ -1112,6 +1112,7 @@ Error WasmObjectFile::parseRelocSection(StringRef Name, ReadContext &Ctx) {
       Reloc.Addend = readVarint64(Ctx);
       break;
     case wasm::R_WASM_FUNCTION_OFFSET_I32:
+    case wasm::R_WASM_FUNCTION_OFFSET_LEB:
       if (!isValidFunctionSymbol(Reloc.Index))
         return badReloc("invalid function relocation");
       Reloc.Addend = readVarint32(Ctx);

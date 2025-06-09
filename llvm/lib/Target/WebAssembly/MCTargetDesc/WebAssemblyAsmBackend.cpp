@@ -48,6 +48,10 @@ public:
 
   bool writeNopData(raw_ostream &OS, uint64_t Count,
                     const MCSubtargetInfo *STI) const override;
+
+  bool shouldPreserveLEBFragmentForRelocation(MCLEBFragment& fragment) const override {
+    return fragment.getValue().getKind() == MCExpr::SymbolRef;
+  }
 };
 
 MCFixupKindInfo

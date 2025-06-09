@@ -547,6 +547,7 @@ void WasmObjectWriter::recordRelocation(MCAssembler &Asm,
   // See: test/MC/WebAssembly/blockaddress.ll
   if ((Type == wasm::R_WASM_FUNCTION_OFFSET_I32 ||
        Type == wasm::R_WASM_FUNCTION_OFFSET_I64 ||
+       Type == wasm::R_WASM_FUNCTION_OFFSET_LEB ||
        Type == wasm::R_WASM_SECTION_OFFSET_I32) &&
       SymA->isDefined()) {
     // SymA can be a temp data symbol that represents a function (in which case
@@ -596,9 +597,9 @@ void WasmObjectWriter::recordRelocation(MCAssembler &Asm,
     }
   }
 
-  // Relocation other than R_WASM_TYPE_INDEX_LEB are required to be
+  // Relocation other than R_WASM_TYPE_INDEX_LEB and R_WASM_FUNCTION_OFFSET_LEB are required to be
   // against a named symbol.
-  if (Type != wasm::R_WASM_TYPE_INDEX_LEB) {
+  if (Type != wasm::R_WASM_TYPE_INDEX_LEB && Type != wasm::R_WASM_FUNCTION_OFFSET_LEB) {
     if (SymA->getName().empty())
       report_fatal_error("relocations against un-named temporaries are not yet "
                          "supported by wasm");
@@ -665,6 +666,7 @@ WasmObjectWriter::getProvisionalValue(const MCAssembler &Asm,
     return WasmIndices[RelEntry.Symbol];
   case wasm::R_WASM_FUNCTION_OFFSET_I32:
   case wasm::R_WASM_FUNCTION_OFFSET_I64:
+  case wasm::R_WASM_FUNCTION_OFFSET_LEB:
   case wasm::R_WASM_SECTION_OFFSET_I32: {
     if (!RelEntry.Symbol->isDefined())
       return 0;
@@ -761,6 +763,7 @@ void WasmObjectWriter::applyRelocations(
 
     switch (RelEntry.Type) {
     case wasm::R_WASM_FUNCTION_INDEX_LEB:
+    case wasm::R_WASM_FUNCTION_OFFSET_LEB:
     case wasm::R_WASM_TYPE_INDEX_LEB:
     case wasm::R_WASM_GLOBAL_INDEX_LEB:
     case wasm::R_WASM_MEMORY_ADDR_LEB:

@@ -153,6 +153,9 @@ public:
 
   bool isCFGStackified() const { return CFGStackified; }
   void setCFGStackified(bool Value = true) { CFGStackified = Value; }
+
+  DenseMap<const MachineInstr *, BranchProbability>
+      BranchProbabilities;
 };
 
 void computeLegalValueVTs(const WebAssemblyTargetLowering &TLI,

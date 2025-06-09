@@ -125,6 +125,7 @@ void InputChunk::relocate(uint8_t *buf) const {
     switch (rel.Type) {
     case R_WASM_TYPE_INDEX_LEB:
     case R_WASM_FUNCTION_INDEX_LEB:
+    case R_WASM_FUNCTION_OFFSET_LEB:
     case R_WASM_GLOBAL_INDEX_LEB:
     case R_WASM_TAG_INDEX_LEB:
     case R_WASM_MEMORY_ADDR_LEB:

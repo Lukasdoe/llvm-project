@@ -132,6 +132,7 @@ int64_t ObjFile::calcNewAddend(const WasmRelocation &reloc) const {
   case R_WASM_MEMORY_ADDR_TLS_SLEB64:
   case R_WASM_FUNCTION_OFFSET_I32:
   case R_WASM_FUNCTION_OFFSET_I64:
+  case R_WASM_FUNCTION_OFFSET_LEB:
   case R_WASM_MEMORY_ADDR_LOCREL_I32:
     return reloc.Addend;
   case R_WASM_SECTION_OFFSET_I32:
@@ -208,7 +209,8 @@ uint64_t ObjFile::calcNewValue(const WasmRelocation &reloc, uint64_t tombstone,
   case R_WASM_TAG_INDEX_LEB:
     return getTagSymbol(reloc.Index)->getTagIndex();
   case R_WASM_FUNCTION_OFFSET_I32:
-  case R_WASM_FUNCTION_OFFSET_I64: {
+  case R_WASM_FUNCTION_OFFSET_I64:
+  case R_WASM_FUNCTION_OFFSET_LEB: {
     if (isa<UndefinedFunction>(sym)) {
       return tombstone ? tombstone : reloc.Addend;
     }
