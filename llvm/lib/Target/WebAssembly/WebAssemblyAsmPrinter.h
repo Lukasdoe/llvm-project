@@ -29,7 +29,7 @@ private:
   bool signaturesEmitted = false;
 
   // func_idx -> [(instr_sym, branch_hint)]
-  DenseMap<MCSymbol*, SmallVector<std::pair<MCSymbol*, uint8_t>>> branchHints;
+  SmallDenseMap<MCSymbol*, SmallVector<std::pair<MCSymbol*, uint8_t>>> branchHints;
 
 public:
   explicit WebAssemblyAsmPrinter(TargetMachine &TM,

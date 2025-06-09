@@ -49,14 +49,11 @@ public:
   bool emitSymbolAttribute(MCSymbol *Symbol, MCSymbolAttr Attribute) override;
   void emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                         Align ByteAlignment) override;
-
+  void emitValueImpl(const MCExpr *Value, unsigned Size, SMLoc Loc) override;
   void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
-
   void emitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                              Align ByteAlignment) override;
-
   void emitIdent(StringRef IdentString) override;
-
   void finishImpl() override;
 
 private:

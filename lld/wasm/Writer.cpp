@@ -170,8 +170,11 @@ void Writer::createCustomSections() {
   for (auto &pair : customSectionMapping) {
     StringRef name = pair.first;
     LLVM_DEBUG(dbgs() << "createCustomSection: " << name << "\n");
-
-    OutputSection *sec = make<CustomSection>(std::string(name), pair.second);
+    OutputSection *sec;
+    if (name == "metadata.code.branch_hint")
+      sec = make<CodeMetaDataSection>(std::string(name), pair.second);
+    else
+      sec = make<CustomSection>(std::string(name), pair.second);
     if (ctx.arg.relocatable || ctx.arg.emitRelocs) {
       auto *sym = make<OutputSectionSymbol>(sec);
       out.linkingSec->addToSymtab(sym);

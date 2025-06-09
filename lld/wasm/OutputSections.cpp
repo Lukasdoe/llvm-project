@@ -271,6 +271,76 @@ void CustomSection::writeTo(uint8_t *buf) {
     section->writeTo(buf);
 }
 
+void CodeMetaDataSection::writeTo(uint8_t *buf) {
+  assert(name == "metadata.code.branch_hint" && "currently only branch hinting code metadata supported");
+
+  log("writing " + toString(*this) + " offset=" + Twine(offset) +
+      " size=" + Twine(getSize()) + " chunks=" + Twine(inputSections.size()));
+
+  assert(offset);
+  buf += offset;
+
+  // Write section header
+  memcpy(buf, header.data(), header.size());
+  buf += header.size();
+  memcpy(buf, nameData.data(), nameData.size());
+  buf += nameData.size();
+
+  // apply relocations and concatenation of all input sections
+  llvm::BumpPtrAllocator Alloc;
+  uint8_t *TempBuf = static_cast<uint8_t *>(Alloc.Allocate(payloadSize, 1));
+  // Write custom sections payload
+  for (const InputChunk *section: inputSections)
+    section->writeTo(TempBuf);
+
+  // sort metadata hints by function index (only possible after relocations are applied)
+  const char *Success = nullptr;
+  unsigned NumFunctionsEncodingSize;
+  unsigned NumFunctions = decodeULEB128(TempBuf, &NumFunctionsEncodingSize, nullptr, &Success);
+  if (Success != nullptr) {
+    fatal("Failed to decode number of functions in " + name + ": " + Success);
+  }
+  unsigned Offset = NumFunctionsEncodingSize;
+
+  SmallVector<std::pair<uint32_t, ArrayRef<uint8_t> >, 8> hints;
+  for (unsigned i = 0; i < NumFunctions; ++i) {
+    const unsigned FunctionStartOffset = Offset;
+    unsigned FuncIdxEncodingSize;
+    const unsigned FuncIndex = decodeULEB128(TempBuf + Offset, &FuncIdxEncodingSize, nullptr, &Success);
+    if (Success != nullptr) {
+      fatal("Failed to decode function index in " + name + ": " + Success);
+    }
+    assert(FuncIdxEncodingSize == 5 && "Function index must be encoded in 5 bytes each to be relocatable");
+    Offset += 5;
+
+    unsigned NumHintsEncodingSize;
+    const unsigned NumHints = decodeULEB128(TempBuf + Offset, &NumHintsEncodingSize, nullptr, &Success);
+    if (Success != nullptr) {
+      fatal("Failed to decode hint size in " + name + ": " + Success);
+    }
+    Offset += NumHintsEncodingSize;
+
+    constexpr unsigned HINT_SIZE = 7; // 5 bytes for uleb128 relocation instr offset, 1 byte hint size, 1 byte hint
+    const unsigned FullSize = FuncIdxEncodingSize + NumHintsEncodingSize + NumHints * HINT_SIZE;
+    // 5 bytes per hint (2 for opcode, 3 for operand)
+    ArrayRef FunctionData(TempBuf + FunctionStartOffset, FullSize);
+    hints.emplace_back(FuncIndex, FunctionData);
+    Offset += NumHints * HINT_SIZE;
+  }
+
+  // sort hints by function index
+  llvm::sort(hints, [](const auto &a, const auto &b) {
+    return a.first < b.first;
+  });
+
+  buf += encodeULEB128(NumFunctions, buf, NumFunctionsEncodingSize);
+  // write sorted hints to output buffer
+  for (const auto &[_, ref]: hints) {
+    memcpy(buf, ref.data(), ref.size());
+    buf += ref.size();
+  }
+}
+
 uint32_t CustomSection::getNumRelocations() const {
   uint32_t count = 0;
   for (const InputChunk *inputSect : inputSections)

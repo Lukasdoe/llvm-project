@@ -25,6 +25,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/MC/WebAssemblyFixupKinds.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 
@@ -155,6 +156,22 @@ void MCWasmStreamer::emitCommonSymbol(MCSymbol *S, uint64_t Size,
 
 void MCWasmStreamer::emitELFSize(MCSymbol *Symbol, const MCExpr *Value) {
   cast<MCSymbolWasm>(Symbol)->setSize(Value);
+}
+
+void MCWasmStreamer::emitValueImpl(const MCExpr *Value, unsigned Size,
+                                   SMLoc Loc) {
+  MCObjectStreamer::emitValueImpl(Value, Size, Loc);
+  MCDataFragment *DF = dyn_cast<MCDataFragment>(getCurrentFragment());
+  assert(DF && "Current fragment must be the data fragment MCObjectStreamer just created");
+
+  if (Size == 5) {
+    assert(!DF->getFixups().empty());
+    assert(DF->getFixups().back().getValue() == Value &&
+      "Unexpected fixup in current data fragment");
+    // replace fixup created by MCObjectStreamer::emitValueImpl with a uleb128 fixup
+    DF->getFixups().back() = MCFixup::create(DF->getContents().size(), Value,
+                                             llvm::WebAssembly::Fixups::fixup_uleb128_i32, Loc);
+  }
 }
 
 void MCWasmStreamer::emitLocalCommonSymbol(MCSymbol *S, uint64_t Size,

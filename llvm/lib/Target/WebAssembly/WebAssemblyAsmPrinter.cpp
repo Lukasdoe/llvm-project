@@ -447,27 +447,21 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
 }
 
 void WebAssemblyAsmPrinter::EmitBranchHintSection(Module &M) {
-  MCSectionWasm *BranchHintsSection = OutContext.getWasmSection(
-    "metadata.code.branch_hint", SectionKind::getMetadata());
+  MCSectionWasm *BranchHintsSection = OutContext.
+      getWasmSection("metadata.code.branch_hint", SectionKind::getMetadata());
   OutStreamer->pushSection();
   OutStreamer->switchSection(BranchHintsSection);
   // should we emit empty branch hints section?
   OutStreamer->emitULEB128IntValue(branchHints.size());
-
   for (const auto &[funcSym, hints]: branchHints) {
     // emit relocatable function index for the function symbol
-    // cast<WebAssemblyTargetStreamer>(OutStreamer->getTargetStreamer())->emitULEB128Symbol(cast<MCSymbolWasm>(funcSym));
-    OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(funcSym, WebAssembly::S_None, OutContext));
-    // getTargetStreamer()->emitULEB128FuncIdx(cast<MCSymbolWasm>(funcSym));
-    // OutStreamer->emitRelocDirective(*MCConstantExpr::create(0, OutContext), "FK_Data_leb128", MCSymbolRefExpr::create(funcSym, WebAssembly::S_None, OutContext), SMLoc(), *OutContext.getSubtargetInfo());
-
+    OutStreamer->emitValue(MCSymbolRefExpr::create(funcSym, WebAssembly::S_FUNCINDEX, OutContext), 5);
     // emit the number of hints for this function
     OutStreamer->emitULEB128IntValue(hints.size());
     for (const auto &[instrSym, hint]: hints) {
       assert(hint == 0 || hint == 1);
       // offset from function start
-      OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(instrSym, OutContext));
-      // cast<WebAssemblyTargetStreamer>(OutStreamer->getTargetStreamer())->emitULEB128Symbol(cast<MCSymbolWasm>(funcSym));
+      OutStreamer->emitValue(MCSymbolRefExpr::create(instrSym, OutContext), 5);
       OutStreamer->emitULEB128IntValue(1); // hint size
       OutStreamer->emitULEB128IntValue(hint);
     }
