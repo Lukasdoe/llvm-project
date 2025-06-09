@@ -1044,10 +1044,6 @@ bool MCAssembler::relaxInstruction(MCRelaxableFragment &F) {
 }
 
 bool MCAssembler::relaxLEB(MCLEBFragment &LF) {
-  if (getBackend().shouldPreserveLEBFragmentForRelocation(LF)) {
-    return false;
-  }
-
   const unsigned OldSize = static_cast<unsigned>(LF.getContents().size());
   unsigned PadTo = OldSize;
   int64_t Value;

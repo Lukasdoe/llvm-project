@@ -11,16 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCWasmStreamer.h"
-
-#include "../Target/WebAssembly/WebAssembly.h"
-#include "../Target/WebAssembly/MCTargetDesc/WebAssemblyFixupKinds.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCFixup.h"
 #include "llvm/MC/MCFragment.h"
 #include "llvm/MC/MCObjectStreamer.h"
@@ -155,17 +151,6 @@ bool MCWasmStreamer::emitSymbolAttribute(MCSymbol *S, MCSymbolAttr Attribute) {
 void MCWasmStreamer::emitCommonSymbol(MCSymbol *S, uint64_t Size,
                                       Align ByteAlignment) {
   llvm_unreachable("Common symbols are not yet implemented for Wasm");
-}
-
-void MCWasmStreamer::emitULEB128Value(const MCExpr *Value) {
-  // TODO: handle normal case
-  auto DF = getContext().allocFragment<MCLEBFragment>(*Value, false);
-  DF->getFixups().push_back(
-  MCFixup::create(5, Value, llvm::WebAssembly::Fixups::fixup_uleb128_i32));
-  // DF->appendContents(Size, 0);
-  // auto frag = getContext().allocFragment<MCLEBFragment>(*MCSymbolRefExpr::create(Sym, this->getContext()), false);
-  // frag->getFixups().push_back(MCFixup::create(0 /*offset in fragment*/, MCSymbolRefExpr::create(Sym, this->getContext()), WebAssembly::Fixups::fixup_uleb128_i32));
-  insert(DF);
 }
 
 void MCWasmStreamer::emitELFSize(MCSymbol *Symbol, const MCExpr *Value) {
