@@ -52,6 +52,9 @@ public:
   virtual void emitExportName(const MCSymbolWasm *Sym,
                               StringRef ExportName) = 0;
 
+  /// .uleb128 value
+  virtual void emitULEBValue(const MCExpr *Value, unsigned Size, SMLoc Loc = SMLoc()) = 0;
+
 protected:
   void emitValueType(wasm::ValType Type);
 };
@@ -72,6 +75,7 @@ public:
   void emitImportModule(const MCSymbolWasm *Sym, StringRef ImportModule) override;
   void emitImportName(const MCSymbolWasm *Sym, StringRef ImportName) override;
   void emitExportName(const MCSymbolWasm *Sym, StringRef ExportName) override;
+  void emitULEBValue(const MCExpr *Value, unsigned Size, SMLoc Loc = SMLoc()) override;
 };
 
 /// This part is for Wasm object output
@@ -91,6 +95,7 @@ public:
                       StringRef ImportName) override {}
   void emitExportName(const MCSymbolWasm *Sym,
                       StringRef ExportName) override {}
+  void emitULEBValue(const MCExpr *Value, unsigned Size, SMLoc Loc = SMLoc()) override;
 };
 
 /// This part is for null output
@@ -108,6 +113,7 @@ public:
   void emitImportModule(const MCSymbolWasm *, StringRef) override {}
   void emitImportName(const MCSymbolWasm *, StringRef) override {}
   void emitExportName(const MCSymbolWasm *, StringRef) override {}
+  void emitULEBValue(const MCExpr *Value, unsigned Size, SMLoc Loc = SMLoc()) override {};
 };
 
 } // end namespace llvm

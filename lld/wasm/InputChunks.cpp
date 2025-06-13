@@ -113,6 +113,8 @@ void InputChunk::relocate(uint8_t *buf) const {
   for (const WasmRelocation &rel : relocations) {
     uint8_t *loc = buf + rel.Offset - inputSectionOffset;
     LLVM_DEBUG(dbgs() << "apply reloc: type=" << relocTypeToString(rel.Type));
+    // R_WASM_TYPE_INDEX_LEB and R_WASM_FUNCTION_OFFSET_LEB don't have to have
+    // symbol names
     if (rel.Type != R_WASM_TYPE_INDEX_LEB)
       LLVM_DEBUG(dbgs() << " sym=" << file->getSymbols()[rel.Index]->getName());
     LLVM_DEBUG(dbgs() << " addend=" << rel.Addend << " index=" << rel.Index
@@ -162,6 +164,9 @@ void InputChunk::relocate(uint8_t *buf) const {
     case R_WASM_FUNCTION_OFFSET_I64:
       write64le(loc, value);
       break;
+    case R_WASM_FUNCTION_INNER_OFFSET_LEB:
+      // inner offsets don't have to be relocated during linking
+      llvm_unreachable("invalid relocation type");
     default:
       llvm_unreachable("unknown relocation type");
     }

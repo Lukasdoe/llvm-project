@@ -350,7 +350,7 @@ private:
 
   uint64_t getProvisionalValue(const MCAssembler &Asm,
                                const WasmRelocationEntry &RelEntry);
-  void applyRelocations(ArrayRef<WasmRelocationEntry> Relocations,
+  void applyRelocations(std::vector<WasmRelocationEntry> &Relocations,
                         uint64_t ContentsOffset, const MCAssembler &Asm);
 
   uint32_t getRelocationIndexValue(const WasmRelocationEntry &RelEntry);
@@ -547,6 +547,7 @@ void WasmObjectWriter::recordRelocation(MCAssembler &Asm,
   // See: test/MC/WebAssembly/blockaddress.ll
   if ((Type == wasm::R_WASM_FUNCTION_OFFSET_I32 ||
        Type == wasm::R_WASM_FUNCTION_OFFSET_I64 ||
+       Type == wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB ||
        Type == wasm::R_WASM_SECTION_OFFSET_I32) &&
       SymA->isDefined()) {
     // SymA can be a temp data symbol that represents a function (in which case
@@ -596,9 +597,10 @@ void WasmObjectWriter::recordRelocation(MCAssembler &Asm,
     }
   }
 
-  // Relocation other than R_WASM_TYPE_INDEX_LEB are required to be
-  // against a named symbol.
-  if (Type != wasm::R_WASM_TYPE_INDEX_LEB) {
+  // Relocation other than R_WASM_TYPE_INDEX_LEB and
+  // R_WASM_FUNCTION_INNER_OFFSET_LEB are required to be against a named symbol.
+  if (Type != wasm::R_WASM_TYPE_INDEX_LEB &&
+      Type != wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB) {
     if (SymA->getName().empty())
       report_fatal_error("relocations against un-named temporaries are not yet "
                          "supported by wasm");
@@ -671,6 +673,11 @@ WasmObjectWriter::getProvisionalValue(const MCAssembler &Asm,
     const auto &Section =
         static_cast<const MCSectionWasm &>(RelEntry.Symbol->getSection());
     return Section.getSectionOffset() + RelEntry.Addend;
+  }
+  case wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB: {
+    // for R_WASM_FUNCTION_INNER_OFFSET_LEB, we actually want the offset of a
+    // symbol within the function's declaration
+    return RelEntry.Addend;
   }
   case wasm::R_WASM_MEMORY_ADDR_LEB:
   case wasm::R_WASM_MEMORY_ADDR_LEB64:
@@ -748,10 +755,11 @@ WasmObjectWriter::getRelocationIndexValue(const WasmRelocationEntry &RelEntry) {
 // Apply the portions of the relocation records that we can handle ourselves
 // directly.
 void WasmObjectWriter::applyRelocations(
-    ArrayRef<WasmRelocationEntry> Relocations, uint64_t ContentsOffset,
+    std::vector<WasmRelocationEntry> &Relocations, uint64_t ContentsOffset,
     const MCAssembler &Asm) {
   auto &Stream = static_cast<raw_pwrite_stream &>(W->OS);
-  for (const WasmRelocationEntry &RelEntry : Relocations) {
+  for (size_t i = 0; i < Relocations.size(); ++i) {
+    const WasmRelocationEntry &RelEntry = Relocations[i];
     uint64_t Offset = ContentsOffset +
                       RelEntry.FixupSection->getSectionOffset() +
                       RelEntry.Offset;
@@ -799,6 +807,13 @@ void WasmObjectWriter::applyRelocations(
     case wasm::R_WASM_MEMORY_ADDR_TLS_SLEB64:
       writePatchableS64(Stream, Value, Offset);
       break;
+    case wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB: {
+      // the inner offset does not change during further linking -> remove reloc
+      writePatchableU32(Stream, Value, Offset);
+      Relocations.erase(Relocations.begin() + i);
+      --i;
+      break;
+    }
     default:
       llvm_unreachable("invalid relocation type");
     }

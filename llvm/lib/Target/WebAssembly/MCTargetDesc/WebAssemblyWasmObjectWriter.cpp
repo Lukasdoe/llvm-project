@@ -92,11 +92,13 @@ unsigned WebAssemblyWasmObjectWriter::getRelocType(
     return wasm::R_WASM_TYPE_INDEX_LEB;
   case WebAssembly::S_None:
     break;
-  case WebAssembly::S_FUNCINDEX:
-    return wasm::R_WASM_FUNCTION_INDEX_I32;
+    case WebAssembly::S_FUNCINDEX:
+      if (static_cast<unsigned>(Fixup.getKind()) == WebAssembly::fixup_uleb128_i32)
+        return wasm::R_WASM_FUNCTION_INDEX_LEB;
+      return wasm::R_WASM_FUNCTION_INDEX_I32;
   }
 
-  switch (unsigned(Fixup.getKind())) {
+  switch (static_cast<unsigned>(Fixup.getKind())) {
   case WebAssembly::fixup_sleb128_i32:
     if (SymA.isFunction())
       return wasm::R_WASM_TABLE_INDEX_SLEB;
@@ -114,6 +116,8 @@ unsigned WebAssemblyWasmObjectWriter::getRelocType(
       return wasm::R_WASM_TAG_INDEX_LEB;
     if (SymA.isTable())
       return wasm::R_WASM_TABLE_NUMBER_LEB;
+    if (SymA.isInSection() && SymA.getSection().isText())
+      return wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB;
     return wasm::R_WASM_MEMORY_ADDR_LEB;
   case WebAssembly::fixup_uleb128_i64:
     assert(SymA.isData());

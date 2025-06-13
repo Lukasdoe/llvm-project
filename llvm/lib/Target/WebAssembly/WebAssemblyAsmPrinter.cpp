@@ -441,6 +441,42 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   EmitProducerInfo(M);
   EmitTargetFeatures(M);
   EmitFunctionAttributes(M);
+
+#ifndef NDEBUG
+  if (!Subtarget)
+    dbgs() << "Warning: Subtarget is null in WebAssemblyAsmPrinter::"
+              "emitEndOfAsmFile. This may happen if no functions "
+              "are defined in the module.\n";
+#endif
+  if (Subtarget && Subtarget->hasBranchHinting())
+    EmitBranchHintSection(M);
+}
+
+void WebAssemblyAsmPrinter::EmitBranchHintSection(Module &M) {
+  MCSectionWasm *BranchHintsSection = OutContext.getWasmSection(
+      "metadata.code.branch_hint", SectionKind::getMetadata());
+  OutStreamer->pushSection();
+  OutStreamer->switchSection(BranchHintsSection);
+  // should we emit empty branch hints section?
+  OutStreamer->emitULEB128IntValue(branchHints.size());
+  for (const auto &[funcSym, hints] : branchHints) {
+    // emit relocatable function index for the function symbol
+    getTargetStreamer()->emitULEBValue(
+        MCSymbolRefExpr::create(funcSym, WebAssembly::S_FUNCINDEX, OutContext),
+        4);
+    // emit the number of hints for this function (is constant -> does not need
+    // handling by target streamer for reloc)
+    OutStreamer->emitULEB128IntValue(hints.size());
+    for (const auto &[instrSym, hint] : hints) {
+      assert(hint == 0 || hint == 1);
+      // offset from function start
+      getTargetStreamer()->emitULEBValue(
+          MCSymbolRefExpr::create(instrSym, OutContext), 4);
+      OutStreamer->emitULEB128IntValue(1); // hint size
+      OutStreamer->emitULEB128IntValue(hint);
+    }
+  }
+  OutStreamer->popSection();
 }
 
 void WebAssemblyAsmPrinter::EmitProducerInfo(Module &M) {
@@ -696,6 +732,29 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
     WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
     MCInst TmpInst;
     MCInstLowering.lower(MI, TmpInst);
+    if (Subtarget->hasBranchHinting() &&
+        MI->getOpcode() == WebAssembly::BR_IF && MFI &&
+        MFI->BranchProbabilities.contains(MI)) {
+      MCSymbol *BrIfSym = OutContext.createTempSymbol();
+      OutStreamer->emitLabel(BrIfSym);
+
+      constexpr uint8_t HintLikely = 0x01;
+      constexpr uint8_t HintUnlikely = 0x00;
+      const BranchProbability &Prob = MFI->BranchProbabilities[MI];
+      uint8_t HintValue;
+      if (Prob > BranchProbability{2, 3})
+        HintValue = HintLikely;
+      else if (Prob < BranchProbability{1, 3})
+        HintValue = HintUnlikely;
+      else
+        goto emit; // Don't emit branch hint for 33-66% probability.
+
+      // we know that we only emit branch hints for internal functions,
+      // therefore we can directly cast and don't need getMCSymbolForFunction
+      MCSymbol *FuncSym = cast<MCSymbolWasm>(getSymbol(&MF->getFunction()));
+      branchHints[FuncSym].emplace_back(BrIfSym, HintValue);
+    }
+emit:
     EmitToStreamer(*OutStreamer, TmpInst);
     break;
   }

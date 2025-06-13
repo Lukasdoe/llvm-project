@@ -703,6 +703,7 @@ static bool supportsWasm32(uint64_t Type) {
   case wasm::R_WASM_TYPE_INDEX_LEB:
   case wasm::R_WASM_GLOBAL_INDEX_LEB:
   case wasm::R_WASM_FUNCTION_OFFSET_I32:
+  case wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB:
   case wasm::R_WASM_SECTION_OFFSET_I32:
   case wasm::R_WASM_TAG_INDEX_LEB:
   case wasm::R_WASM_GLOBAL_INDEX_I32:
@@ -740,6 +741,7 @@ static uint64_t resolveWasm32(uint64_t Type, uint64_t Offset, uint64_t S,
   case wasm::R_WASM_TYPE_INDEX_LEB:
   case wasm::R_WASM_GLOBAL_INDEX_LEB:
   case wasm::R_WASM_FUNCTION_OFFSET_I32:
+  case wasm::R_WASM_FUNCTION_INNER_OFFSET_LEB:
   case wasm::R_WASM_SECTION_OFFSET_I32:
   case wasm::R_WASM_TAG_INDEX_LEB:
   case wasm::R_WASM_GLOBAL_INDEX_I32:

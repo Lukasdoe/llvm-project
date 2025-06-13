@@ -14,11 +14,14 @@
 
 #include "MCTargetDesc/WebAssemblyTargetStreamer.h"
 #include "MCTargetDesc/WebAssemblyMCTypeUtilities.h"
+#include "WebAssemblyFixupKinds.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCSectionWasm.h"
 #include "llvm/MC/MCSymbolWasm.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormattedStream.h"
+
 using namespace llvm;
 
 WebAssemblyTargetStreamer::WebAssemblyTargetStreamer(MCStreamer &S)
@@ -129,6 +132,49 @@ void WebAssemblyTargetWasmStreamer::emitLocal(ArrayRef<wasm::ValType> Types) {
     Streamer.emitULEB128IntValue(Pair.second);
     emitValueType(Pair.first);
   }
+}
+
+void WebAssemblyTargetWasmStreamer::emitULEBValue(const MCExpr *Value,
+                                                  unsigned Size, SMLoc Loc) {
+  // have object streamer create the data fragment and (wrong) fixup. We can't
+  // use emitULEB128Value since it assumes the value is constant (doesn't emit
+  // relocation / fixup)
+  Streamer.emitValue(Value, Size, Loc);
+  MCDataFragment *DF = dyn_cast<MCDataFragment>(Streamer.getCurrentFragment());
+  assert(DF && "Current fragment must be the data fragment MCObjectStreamer "
+               "just created");
+  assert(!DF->getFixups().empty() &&
+         "fixup expected in current data fragment - use "
+         "MCObjectStreamer::emitValueImpl for uleb128 constants");
+  assert(DF->getFixups().back().getValue() == Value &&
+         "Unexpected fixup in current data fragment");
+  WebAssembly::Fixups RequiredFixup;
+  switch (Size) {
+  case 4:
+    RequiredFixup = WebAssembly::Fixups::fixup_uleb128_i32;
+    // the relocation is 5 bytes, 1 byte larger than the original size
+    DF->appendContents(1, 0);
+    break;
+  case 8:
+    RequiredFixup = WebAssembly::Fixups::fixup_uleb128_i64;
+    // the relocation is 10 bytes, 2 byte larger than the original size
+    DF->appendContents(2, 0);
+    break;
+  default:
+    llvm_unreachable("Unexpected size for uleb128 fixup");
+  }
+  // replace fixup created by MCObjectStreamer::emitValueImpl with a uleb128
+  // fixup
+  DF->getFixups().back() =
+      MCFixup::create(DF->getContents().size() - 5, Value, RequiredFixup, Loc);
+}
+
+void WebAssemblyTargetAsmStreamer::emitULEBValue(const MCExpr *Value,
+                                                 unsigned Size, SMLoc Loc) {
+  // for normal assembly output, we don't need to fiddle with the fixups (treat
+  // value like normal data) this doesn't work for the object writer, since the
+  // MCObjectStreamer assumes uleb128 values are always constant
+  Streamer.emitULEB128Value(Value);
 }
 
 void WebAssemblyTargetWasmStreamer::emitIndIdx(const MCExpr *Value) {

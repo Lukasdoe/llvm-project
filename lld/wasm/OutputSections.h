@@ -11,9 +11,6 @@
 
 #include "InputChunks.h"
 #include "WriterUtils.h"
-#include "lld/Common/ErrorHandler.h"
-#include "lld/Common/LLVM.h"
-#include "llvm/ADT/DenseMap.h"
 
 namespace lld {
 
@@ -130,6 +127,19 @@ protected:
   size_t payloadSize = 0;
   std::vector<InputChunk *> inputSections;
   std::string nameData;
+};
+
+class CodeMetaDataSection : public CustomSection {
+public:
+  CodeMetaDataSection(std::string name, ArrayRef<InputChunk *> inputSections)
+      : CustomSection(name, inputSections) {}
+
+  void writeTo(uint8_t *buf) override;
+  void finalizeContents() override;
+private:
+  // store hints ordered by function index
+  std::map<uint32_t, ArrayRef<uint8_t>> relocatedHints;
+  llvm::BumpPtrAllocator relocationAlloc;
 };
 
 } // namespace wasm
