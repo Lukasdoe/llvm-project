@@ -54,6 +54,10 @@ using namespace llvm;
 #define DEBUG_TYPE "asm-printer"
 
 extern cl::opt<bool> WasmKeepRegisters;
+static cl::opt<uint32_t> WasmHighBranchProb("wasm-branch-prob-high", cl::Hidden,
+                                            cl::desc(""), cl::init(0x40000000));
+static cl::opt<uint32_t> WasmLowBranchProb("wasm-branch-prob-low", cl::Hidden,
+                                           cl::desc(""), cl::init(0x40000000));
 
 //===----------------------------------------------------------------------===//
 // Helpers.
@@ -742,9 +746,9 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
       constexpr uint8_t HintUnlikely = 0x00;
       const BranchProbability &Prob = MFI->BranchProbabilities[MI];
       uint8_t HintValue;
-      if (Prob > BranchProbability{2, 3})
+      if (Prob > BranchProbability::getRaw(WasmHighBranchProb.getValue()))
         HintValue = HintLikely;
-      else if (Prob < BranchProbability{1, 3})
+      else if (Prob <= BranchProbability::getRaw(WasmLowBranchProb.getValue()))
         HintValue = HintUnlikely;
       else
         goto emit; // Don't emit branch hint for 33-66% probability.
