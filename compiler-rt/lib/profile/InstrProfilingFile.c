@@ -765,7 +765,6 @@ static int checkBounds(int Idx, int Strlen) {
 static int parseFilenamePattern(const char *FilenamePat,
                                 unsigned CopyFilenamePat) {
   int NumPids = 0, NumHosts = 0, NumBinaryIds = 0, I;
-  char *PidChars = &lprofCurFilename.PidChars[0];
   char *Hostname = &lprofCurFilename.Hostname[0];
   int MergingEnabled = 0;
   int FilenamePatLen = strlen(FilenamePat);
@@ -806,12 +805,17 @@ static int parseFilenamePattern(const char *FilenamePat,
         break;
       if (FilenamePat[I] == 'p') {
         if (!NumPids++) {
+#if defined(__wasm__)
+          return -1; // WebAssembly does not support getpid
+#else
+          char *PidChars = &lprofCurFilename.PidChars[0];
           if (snprintf(PidChars, MAX_PID_SIZE, "%ld", (long)getpid()) <= 0) {
             PROF_WARN("Unable to get pid for filename pattern %s. Using the "
                       "default name.",
                       FilenamePat);
             return -1;
           }
+#endif
         }
       } else if (FilenamePat[I] == 'h') {
         if (!NumHosts++)
@@ -1019,7 +1023,11 @@ static const char *getCurFilename(char *FilenameBuf, int ForceUseBuf) {
           continue;
         char LoadModuleSignature[SIGLEN + 1];
         int S;
+#if defined(__wasm__)
+        int ProfilePoolId = 0; // WebAssembly does not support getpid
+#else
         int ProfilePoolId = getpid() % lprofCurFilename.MergePoolSize;
+#endif
         S = snprintf(LoadModuleSignature, SIGLEN + 1, "%" PRIu64 "_%d",
                      lprofGetLoadModuleSignature(), ProfilePoolId);
         if (S == -1 || S > SIGLEN)

@@ -255,9 +255,11 @@ COMPILER_RT_VISIBILITY FILE *lprofOpenFileEx(const char *ProfileName) {
     return NULL;
   }
 #else
+#if !defined(__wasm__) || defined(__wasm_atomics__) // silence warning for single threaded wasm
   /* Worst case no locking applied.  */
   PROF_WARN("Concurrent file access is not supported : %s\n",
             "lack file locking");
+#endif
   fd = open(ProfileName, O_RDWR | O_CREAT, 0666);
   if (fd < 0)
     return NULL;
@@ -314,7 +316,7 @@ static int isLocalFilesystem(int Fd) {
 }
 #endif
 
-static int isMmapSafe(int Fd) {
+[[maybe_unused]] static int isMmapSafe(int Fd) {
   if (getenv("LLVM_PROFILE_NO_MMAP")) // For testing purposes.
     return 0;
 #ifdef _AIX
@@ -327,6 +329,7 @@ static int isMmapSafe(int Fd) {
 COMPILER_RT_VISIBILITY void lprofGetFileContentBuffer(FILE *F, uint64_t Length,
                                                       ManagedMemory *Buf) {
   Buf->Status = MS_INVALID;
+#if !defined(__wasm__) // WebAssembly does not support mmap.
   if (isMmapSafe(fileno(F))) {
     Buf->Addr =
         mmap(NULL, Length, PROT_READ, MAP_SHARED | MAP_FILE, fileno(F), 0);
@@ -336,6 +339,7 @@ COMPILER_RT_VISIBILITY void lprofGetFileContentBuffer(FILE *F, uint64_t Length,
       Buf->Status = MS_MMAP;
     return;
   }
+#endif
 
   if (getenv("LLVM_PROFILE_VERBOSE"))
     PROF_NOTE("%s\n", "could not use mmap; using fread instead");
@@ -371,9 +375,11 @@ void lprofReleaseBuffer(ManagedMemory *Buf, size_t Length) {
   case MS_MALLOC:
     free(Buf->Addr);
     break;
+#if !defined(__wasm__) // WebAssembly does not support munmap.
   case MS_MMAP:
     (void)munmap(Buf->Addr, Length);
     break;
+#endif
   default:
     PROF_ERR("%s: Buffer has invalid state: %d\n", __func__, Buf->Status);
     break;
