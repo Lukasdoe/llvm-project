@@ -42,6 +42,10 @@ def HasCallIndirectOverlong :
     Predicate<"Subtarget->hasCallIndirectOverlong()">,
     AssemblerPredicate<(all_of FeatureCallIndirectOverlong), "call-indirect-overlong">;
 
+def HasCompilationHintsCallTargets :
+    Predicate<"Subtarget->hasCompilationHintsCallTargets()">,
+    AssemblerPredicate<(all_of FeatureCompilationHintsCallTargets), "compilation-hints-call-targets">;
+
 def HasExceptionHandling :
     Predicate<"Subtarget->hasExceptionHandling()">,
     AssemblerPredicate<(all_of FeatureExceptionHandling), "exception-handling">;

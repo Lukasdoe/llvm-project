@@ -190,22 +190,13 @@ WasmDumper::dumpCustomSection(const WasmSection &WasmSec) {
     }
     CustomSec = std::move(TargetFeaturesSec);
   } else if (WasmSec.Name == "metadata.code.branch_hint") {
-    std::unique_ptr<WasmYAML::BranchHintSection> BranchHintSec =
-        std::make_unique<WasmYAML::BranchHintSection>();
-    for (auto &E : Obj.getBranchHints()) {
-      WasmYAML::CodeMetadataFuncEntry<WasmYAML::BranchHint> FuncEntry;
-      FuncEntry.FuncIdx = E.FuncIdx;
-      for (const auto &[Offset, Size, Data] : E.Hints) {
-        WasmYAML::CodeMetadataItemEntry<WasmYAML::BranchHint> ItemEntry;
-        ItemEntry.Offset = Offset;
-        ItemEntry.Size = Size;
-        ItemEntry.Data =
-            static_cast<WasmYAML::BranchHint>(static_cast<uint8_t>(Data));
-        FuncEntry.Hints.push_back(ItemEntry);
-      }
-      BranchHintSec->Entries.push_back(std::move(FuncEntry));
-    }
+    auto BranchHintSec = std::make_unique<WasmYAML::BranchHintSection>();
+    BranchHintSec->Entries = Obj.getBranchHints();
     CustomSec = std::move(BranchHintSec);
+  } else if (WasmSec.Name == "metadata.code.call_targets") {
+    auto CallTargetsSec = std::make_unique<WasmYAML::CallTargetsHintSection>();
+    CallTargetsSec->Entries = Obj.getCallTargetHints();
+    CustomSec = std::move(CallTargetsSec);
   } else {
     CustomSec = std::make_unique<WasmYAML::CustomSection>(WasmSec.Name);
   }

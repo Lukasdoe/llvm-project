@@ -21,6 +21,13 @@ namespace llvm {
 class WebAssemblyTargetStreamer;
 
 using BranchHintRecord = SmallVector<std::pair<MCSymbol *, uint8_t>, 0>;
+struct ICallTargetRecord {
+    MCSymbol *CallTargetSym;
+    // frequency in percent: [0, 100]
+    uint8_t CallFrequency;
+};
+using FunctionICallInformation =
+    SmallVector<std::pair<MCSymbol *, SmallVector<ICallTargetRecord, 1>>, 0>;
 
 class LLVM_LIBRARY_VISIBILITY WebAssemblyAsmPrinter final : public AsmPrinter {
 public:
@@ -34,6 +41,7 @@ private:
 
   // vec idx == local func_idx
   SmallDenseMap<MCSymbol *, BranchHintRecord> BranchHints;
+  SmallDenseMap<MCSymbol *, FunctionICallInformation> ICallTargetHints;
 
 public:
   explicit WebAssemblyAsmPrinter(TargetMachine &TM,
@@ -67,6 +75,7 @@ public:
   void EmitTargetFeatures(Module &M);
   void EmitFunctionAttributes(Module &M);
   void emitBranchHintSection() const;
+  void emitCHCallTargetsSection() const;
   void emitSymbolType(const MCSymbolWasm *Sym);
   void emitGlobalVariable(const GlobalVariable *GV) override;
   void emitJumpTableInfo() override;
@@ -86,7 +95,8 @@ public:
                                        bool &InvokeDetected);
   MCSymbol *getOrCreateWasmSymbol(StringRef Name);
   void emitDecls(const Module &M);
-  void recordBranchHint(const MachineInstr *MI);
+  void recordBranchHint(const MachineInstr * MI);
+  void recordCallTargets(const MachineInstr* MI);
 };
 
 } // end namespace llvm

@@ -539,6 +539,18 @@ using WasmFunctionBranchHints =
     WasmCodeMetadataFuncEntry<WasmCodeMetadataBranchHint>;
 using WasmBranchHint = WasmCodeMetadataItemEntry<WasmCodeMetadataBranchHint>;
 
+struct WasmCodeMetadataCallTarget {
+  uint32_t FuncIdx;
+  uint32_t CallFrequency;
+};
+
+using WasmCodeMetadataCallTargetsHint = std::vector<WasmCodeMetadataCallTarget>;
+
+using WasmFunctionCallTargetHints =
+    WasmCodeMetadataFuncEntry<WasmCodeMetadataCallTargetsHint>;
+using WasmCallTargetHint =
+    WasmCodeMetadataItemEntry<WasmCodeMetadataCallTargetsHint>;
+
 // Useful comparison operators
 inline bool operator==(const WasmSignature &LHS, const WasmSignature &RHS) {
   return LHS.State == RHS.State && LHS.Returns == RHS.Returns &&

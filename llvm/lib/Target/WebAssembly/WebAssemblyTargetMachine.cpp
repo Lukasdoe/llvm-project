@@ -53,6 +53,8 @@ static cl::opt<bool> WasmDisableFixIrreducibleControlFlowPass(
              " irreducible control flow optimization pass"),
     cl::init(false));
 
+static cl::opt<bool> WasmEnableMachineBlockOrdering("wasm-enable-machine-block-ordering", cl::Hidden, cl::init(false));
+
 // Exception handling & setjmp-longjmp handling related options.
 
 // Emscripten's asm.js-style exception handling
@@ -590,9 +592,11 @@ void WebAssemblyPassConfig::addPostRegAlloc() {
   disablePass(&ShrinkWrapID);
   disablePass(&RemoveLoadsIntoFakeUsesID);
 
-  // This pass hurts code size for wasm because it can generate irreducible
-  // control flow.
-  disablePass(&MachineBlockPlacementID);
+  if (!WasmEnableMachineBlockOrdering.getValue()) {
+    // This pass hurts code size for wasm because it can generate irreducible
+    // control flow.
+    disablePass(&MachineBlockPlacementID);
+  }
 
   TargetPassConfig::addPostRegAlloc();
 }

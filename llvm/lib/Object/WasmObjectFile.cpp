@@ -1035,6 +1035,8 @@ Error WasmObjectFile::parseCodeMetadataSection(StringRef Name,
   const auto HintTypeName = Name.substr(14 /* "code_metadata." */);
   if (HintTypeName == "branch_hint") {
     return parseBranchHintSection(Ctx);
+  } else if (HintTypeName == "call_targets") {
+    return parseCHCallTargetsSection(Ctx);
   }
   dbgs() << "invalid code metadata section: " << Name
          << "; ignoring section.\n";
@@ -1064,6 +1066,40 @@ Error WasmObjectFile::parseBranchHintSection(ReadContext &Ctx) {
   }
   if (Ctx.Ptr != Ctx.End) {
     dbgs() << "branch hint section ended prematurely; ignoring section.\n";
+  }
+  return Error::success();
+}
+
+Error WasmObjectFile::parseCHCallTargetsSection(ReadContext &Ctx) {
+  const uint32_t NumFuncs = readVaruint32(Ctx);
+  CallTargetHints.reserve(NumFuncs);
+  for (size_t i = 0; i < NumFuncs; ++i) {
+    wasm::WasmFunctionCallTargetHints FuncEntry;
+    FuncEntry.FuncIdx = readVaruint32(Ctx);
+    const uint32_t NumHints = readVaruint32(Ctx);
+    for (size_t j = 0; j < NumHints; ++j) {
+      wasm::WasmCallTargetHint Hint;
+      Hint.Offset = readVaruint32(Ctx);
+      Hint.Size = readVaruint32(Ctx);
+      const auto *const EndPtr = Ctx.Ptr + Hint.Size;
+      while (Ctx.Ptr < EndPtr) {
+        const uint32_t Target = readVaruint32(Ctx);
+        if (!isValidFunctionIndex(Target)) {
+          dbgs()
+              << "invalid call target function index; ignoring metadata.code."
+                 "call_targets section.\n";
+          return Error::success();
+        }
+        const uint32_t CallFrequency = readVaruint32(Ctx);
+        Hint.Data.emplace_back(
+            wasm::WasmCodeMetadataCallTarget{Target, CallFrequency});
+      }
+      FuncEntry.Hints.push_back(Hint);
+    }
+    CallTargetHints.emplace_back(std::move(FuncEntry));
+  }
+  if (Ctx.Ptr != Ctx.End) {
+    dbgs() << "call target section ended prematurely; ignoring section.\n";
   }
   return Error::success();
 }

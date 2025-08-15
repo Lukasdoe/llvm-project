@@ -100,6 +100,12 @@ static void sectionMapping(IO &IO, WasmYAML::BranchHintSection &Section) {
   IO.mapRequired("Entries", Section.Entries);
 }
 
+static void sectionMapping(IO &IO, WasmYAML::CallTargetsHintSection &Section) {
+  commonSectionMapping(IO, Section);
+  IO.mapRequired("Name", Section.Name);
+  IO.mapRequired("Entries", Section.Entries);
+}
+
 static void sectionMapping(IO &IO, WasmYAML::CustomSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Name", Section.Name);
@@ -212,6 +218,11 @@ void MappingTraits<std::unique_ptr<WasmYAML::Section>>::mapping(
       if (!IO.outputting())
         Section.reset(new WasmYAML::BranchHintSection());
       sectionMapping(IO, *cast<WasmYAML::BranchHintSection>(Section.get()));
+    } else if (SectionName == "metadata.code.call_targets") {
+      if (!IO.outputting())
+        Section.reset(new WasmYAML::CallTargetsHintSection());
+      sectionMapping(IO,
+                     *cast<WasmYAML::CallTargetsHintSection>(Section.get()));
     } else {
       if (!IO.outputting())
         Section.reset(new WasmYAML::CustomSection(SectionName));
@@ -364,28 +375,46 @@ void MappingTraits<WasmYAML::FeatureEntry>::mapping(
 }
 
 template <>
-void MappingTraits<WasmYAML::CodeMetadataFuncEntry<WasmYAML::BranchHint>>::
-    mapping(IO &IO,
-            WasmYAML::CodeMetadataFuncEntry<WasmYAML::BranchHint> &FuncEntry) {
+void MappingTraits<wasm::WasmFunctionBranchHints>::mapping(
+    IO &IO, wasm::WasmFunctionBranchHints &FuncEntry) {
   IO.mapRequired("FuncIdx", FuncEntry.FuncIdx);
   IO.mapRequired("Hints", FuncEntry.Hints);
 }
 
 template <>
-void MappingTraits<WasmYAML::CodeMetadataItemEntry<WasmYAML::BranchHint>>::
-    mapping(IO &IO,
-            WasmYAML::CodeMetadataItemEntry<WasmYAML::BranchHint> &ItemEntry) {
+void MappingTraits<wasm::WasmFunctionCallTargetHints>::mapping(
+    IO &IO, wasm::WasmFunctionCallTargetHints &FuncEntry) {
+  IO.mapRequired("FuncIdx", FuncEntry.FuncIdx);
+  IO.mapRequired("Hints", FuncEntry.Hints);
+}
+
+template <>
+void MappingTraits<wasm::WasmBranchHint>::mapping(
+    IO &IO, wasm::WasmBranchHint &ItemEntry) {
   IO.mapRequired("Offset", ItemEntry.Offset);
   IO.mapRequired("Size", ItemEntry.Size);
   IO.mapRequired("Data", ItemEntry.Data);
 }
 
-void ScalarEnumerationTraits<WasmYAML::BranchHint>::enumeration(
-    IO &IO, WasmYAML::BranchHint &BranchHint) {
+template <>
+void MappingTraits<wasm::WasmCallTargetHint>::mapping(
+    IO &IO, wasm::WasmCallTargetHint &ItemEntry) {
+  IO.mapRequired("Offset", ItemEntry.Offset);
+  IO.mapRequired("Size", ItemEntry.Size);
+  IO.mapRequired("Data", ItemEntry.Data);
+}
+
+void ScalarEnumerationTraits<wasm::WasmCodeMetadataBranchHint>::enumeration(
+    IO &IO, wasm::WasmCodeMetadataBranchHint &BranchHint) {
   IO.enumCase(BranchHint, "UNLIKELY",
-              static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::UNLIKELY));
-  IO.enumCase(BranchHint, "LIKELY",
-              static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::LIKELY));
+              wasm::WasmCodeMetadataBranchHint::UNLIKELY);
+  IO.enumCase(BranchHint, "LIKELY", wasm::WasmCodeMetadataBranchHint::LIKELY);
+}
+
+void MappingTraits<wasm::WasmCodeMetadataCallTarget>::mapping(
+    IO &IO, wasm::WasmCodeMetadataCallTarget &CallTarget) {
+  IO.mapRequired("FuncIdx", CallTarget.FuncIdx);
+  IO.mapRequired("CallFrequency", CallTarget.CallFrequency);
 }
 
 void MappingTraits<WasmYAML::SegmentInfo>::mapping(

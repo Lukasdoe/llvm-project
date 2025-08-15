@@ -40,6 +40,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAssembler.h"
@@ -49,6 +50,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -455,8 +457,10 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   EmitFunctionAttributes(M);
 
   // Subtarget may be null if no functions have been defined in file
-  if (Subtarget && Subtarget->hasBranchHinting())
-    emitBranchHintSection();
+  if (Subtarget) {
+    if (Subtarget->hasBranchHinting()) emitBranchHintSection();
+    if (Subtarget->hasCompilationHintsCallTargets()) emitCHCallTargetsSection();
+  }
 }
 
 void WebAssemblyAsmPrinter::emitBranchHintSection() const {
@@ -495,6 +499,51 @@ void WebAssemblyAsmPrinter::emitBranchHintSection() const {
     }
   } else {
     for (const auto &FuncEntry : BranchHints) {
+      EmitFunc(FuncEntry.first, FuncEntry.second);
+    }
+  }
+  OutStreamer->popSection();
+}
+
+void WebAssemblyAsmPrinter::emitCHCallTargetsSection() const {
+  MCSectionWasm *CHCallTargetsSection = OutContext.getWasmSection(".custom_section.metadata.code.call_targets", SectionKind::getMetadata());
+  const uint32_t NumFunctionHints = ICallTargetHints.size();
+  if (NumFunctionHints == 0)
+    return;
+  OutStreamer->pushSection();
+  OutStreamer->switchSection(CHCallTargetsSection);
+  OutStreamer->emitULEB128IntValue(NumFunctionHints);
+
+  auto EmitFunc = [this](const MCSymbol* Sym, const FunctionICallInformation& Hints) {
+    assert(!Hints.empty());
+    // emit relocatable function index for the function symbol
+    OutStreamer->emitULEB128Value(
+        MCSymbolRefExpr::create(Sym, WebAssembly::S_FUNCINDEX, OutContext));
+    // emit the number of hints for this function (is constant -> does not
+    // need handling by target streamer for reloc)
+    OutStreamer->emitULEB128IntValue(Hints.size());
+    for (const auto &[InstrSym, Targets] : Hints) {
+      // offset from function start
+      OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(
+          InstrSym, WebAssembly::S_DEBUG_REF, OutContext));
+      OutStreamer->emitULEB128IntValue(10 * Targets.size()); // hint size
+      for (const auto &[CallTargetSym, CallFrequency] : Targets) {
+        OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(
+            CallTargetSym, WebAssembly::S_FUNCINDEX, OutContext));
+        OutStreamer->emitULEB128IntValue(CallFrequency, 5);
+      }
+    }
+  };
+
+  if (MCAssembler* AssemblerPtr = OutStreamer->getAssemblerPtr()) {
+    const auto &AssemblerSymbols = AssemblerPtr->getSymbols();
+    for (const auto &Sym : AssemblerSymbols) {
+      if (auto FuncEntry = ICallTargetHints.find(Sym); FuncEntry != ICallTargetHints.end()) {
+        EmitFunc(Sym, FuncEntry->second);
+      }
+    }
+  } else {
+    for (const auto &FuncEntry : ICallTargetHints) {
       EmitFunc(FuncEntry.first, FuncEntry.second);
     }
   }
@@ -787,6 +836,86 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
   FuncEntry->second.emplace_back(BrIfSym, HintValue);
 }
 
+Instruction *getIRInstruction(MachineInstr *MI) {
+  for (const MachineOperand &MO : MI->operands()) {
+    if (MO.isMetadata()) {
+      const MDNode *N = MO.getMetadata();
+      // We expect a single-operand MDNode containing our value.
+      if (N && N->getNumOperands() > 0) {
+        // Check if the operand is a ValueAsMetadata
+        if (auto const *VAM = dyn_cast<ValueAsMetadata>(N->getOperand(0))) {
+          Value *V = VAM->getValue();
+          // Finally, cast the Value back to an Instruction.
+          if (Instruction *I = dyn_cast<Instruction>(V)) {
+            return I;
+          }
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
+void WebAssemblyAsmPrinter::recordCallTargets(const MachineInstr *const MI) {
+  const Instruction *I = getIRInstruction(const_cast<MachineInstr *>(MI));
+  if (!I) {
+    LLVM_DEBUG(
+        dbgs() << "Could not find call target for " << *MI
+               << ", unable to generate compilation hint for this call.\n");
+    return;
+  }
+  uint64_t TotalCount;
+  SmallVector<InstrProfValueData, 4> InstValueDataAnnotations =
+      getValueProfDataFromInst(*I, IPVK_IndirectCallTarget,
+                               std::numeric_limits<uint32_t>::max(),
+                               TotalCount);
+  InstrProfSymtab Symtab;
+  Module &M = *MF->getFunction().getParent();
+  if (Error E = Symtab.create(M)) {
+    std::string SymtabFailure = toString(std::move(E));
+    abort();
+  }
+  if (InstValueDataAnnotations.empty()) {
+    LLVM_DEBUG(dbgs() << "No value profile data for indirect call targets in "
+                      << *I << '\n');
+    return;
+  }
+  MCSymbol *LocalFuncSym = getSymbol(&MF->getFunction());
+  MCSymbol *IndirectCallLabel = OutContext.createTempSymbol();
+  OutStreamer->emitLabel(IndirectCallLabel);
+  auto FuncEntry = ICallTargetHints.find(LocalFuncSym);
+  if (FuncEntry == ICallTargetHints.end()) {
+    FuncEntry = ICallTargetHints.insert({LocalFuncSym, {}}).first;
+  }
+  auto &TargetRecords =
+      FuncEntry->second
+          .emplace_back(IndirectCallLabel, SmallVector<ICallTargetRecord>{})
+          .second;
+
+  for (const auto &[Value, Count] : InstValueDataAnnotations) {
+    assert(Count <= TotalCount);
+    const auto *const Func = Symtab.getFunction(Value);
+    if (!Func) {
+      LLVM_DEBUG(outs() << "Could not resolve function name for indirect call "
+                           "target; Invalid call target hash.");
+      continue;
+    }
+    auto *const FuncSym = getSymbol(Func);
+    assert(FuncSym &&
+           "Could not resolve function symbol for indirect call target");
+    // round down so that the sum never exceeds 100(%)
+    const uint8_t CallFrequency =
+        static_cast<uint8_t>(static_cast<double>(Count) / TotalCount * 100);
+    TargetRecords.emplace_back(ICallTargetRecord{FuncSym, CallFrequency});
+    LLVM_DEBUG(dbgs() << "Indirect call target: " << FuncSym->getName()
+                      << ", Count: " << Count << ", Frequency: "
+                      << static_cast<unsigned>(CallFrequency) << "\n");
+  }
+  if (TargetRecords.empty()) {
+    ICallTargetHints.erase(LocalFuncSym);
+  }
+}
+
 void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
   LLVM_DEBUG(dbgs() << "EmitInstruction: " << *MI << '\n');
   WebAssembly_MC::verifyInstructionPredicates(MI->getOpcode(),
@@ -842,6 +971,14 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
     // These are pseudo instructions to represent catch clauses in try_table
     // instruction to simulate block return values.
     break;
+  case WebAssembly::CALL_INDIRECT:
+  case WebAssembly::CALL_INDIRECT_S:
+  case WebAssembly::RET_CALL_INDIRECT:
+  case WebAssembly::RET_CALL_INDIRECT_S: {
+    if (getSubtarget().hasCompilationHintsCallTargets())
+      recordCallTargets(MI);
+    [[fallthrough]];
+  }
   default: {
     WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
     MCInst TmpInst;

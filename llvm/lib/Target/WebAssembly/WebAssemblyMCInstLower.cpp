@@ -216,6 +216,9 @@ void WebAssemblyMCInstLower::lower(const MachineInstr *MI,
     default:
       MI->print(errs());
       llvm_unreachable("unknown operand type");
+    case MachineOperand::MO_Metadata:
+      // ignore metadata operands
+      continue;
     case MachineOperand::MO_MachineBasicBlock:
       MI->print(errs());
       llvm_unreachable("MachineBasicBlock operand should have been rewritten");

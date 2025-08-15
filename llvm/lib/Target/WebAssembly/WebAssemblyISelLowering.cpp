@@ -1466,6 +1466,12 @@ WebAssemblyTargetLowering::LowerCall(CallLoweringInfo &CLI,
     return DAG.getNode(WebAssemblyISD::RET_CALL, DL, NodeTys, Ops);
   }
 
+  if (CLI.CB && Subtarget->hasCompilationHintsCallTargets()) {
+    Ops.emplace_back(DAG.getMDNode(
+        MDNode::get(CLI.CB->getContext(),
+                    ValueAsMetadata::get(const_cast<CallBase *>(CLI.CB)))));
+  }
+
   InTys.push_back(MVT::Other);
   SDVTList InTyList = DAG.getVTList(InTys);
   SDValue Res = DAG.getNode(WebAssemblyISD::CALL, DL, InTyList, Ops);
