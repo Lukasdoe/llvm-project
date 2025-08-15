@@ -5323,6 +5323,10 @@ def mbulk_memory_opt : Flag<["-"], "mbulk-memory-opt">, Group<m_wasm_Features_Gr
 def mno_bulk_memory_opt : Flag<["-"], "mno-bulk-memory-opt">, Group<m_wasm_Features_Group>;
 def mcall_indirect_overlong : Flag<["-"], "mcall-indirect-overlong">, Group<m_wasm_Features_Group>;
 def mno_call_indirect_overlong : Flag<["-"], "mno-call-indirect-overlong">, Group<m_wasm_Features_Group>;
+def mcompilation_hints : Flag<["-"], "mcompilation-hints">, Group<m_wasm_Features_Group>;
+def mno_compilation_hints : Flag<["-"], "mnocompilation-hints">, Group<m_wasm_Features_Group>;
+def mcompilation_hints_call_targets : Flag<["-"], "mcompilation-hints-call-targets">, Group<m_wasm_Features_Group>;
+def mno_compilation_hints_call_targets : Flag<["-"], "mnocompilation-hints-call-targets">, Group<m_wasm_Features_Group>;
 def mexception_handing : Flag<["-"], "mexception-handling">, Group<m_wasm_Features_Group>;
 def mno_exception_handing : Flag<["-"], "mno-exception-handling">, Group<m_wasm_Features_Group>;
 def mextended_const : Flag<["-"], "mextended-const">, Group<m_wasm_Features_Group>;

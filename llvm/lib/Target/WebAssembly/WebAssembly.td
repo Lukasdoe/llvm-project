@@ -41,6 +41,14 @@ def FeatureCallIndirectOverlong :
       SubtargetFeature<"call-indirect-overlong", "HasCallIndirectOverlong", "true",
                        "Enable overlong encoding for call_indirect immediates">;
 
+def FeatureCompilationHintsCallTargets :
+      SubtargetFeature<"compilation-hints-call-targets", "HasCompilationHintsCallTargets", "true",
+                       "Enable call target compilation hints">;
+
+def FeatureCompilationHints :
+      SubtargetFeature<"compilation-hints", "HasCompilationHints", "true", "Enable all available compilation hints",
+                       [FeatureCompilationHintsCallTargets, FeatureBranchHinting]>;
+
 def FeatureExceptionHandling :
       SubtargetFeature<"exception-handling", "HasExceptionHandling", "true",
                        "Enable Wasm exception handling">;

@@ -28,6 +28,7 @@ static constexpr llvm::StringTable BuiltinStrings =
 #define BUILTIN CLANG_BUILTIN_STR_TABLE
 #define TARGET_BUILTIN CLANG_TARGET_BUILTIN_STR_TABLE
 #include "clang/Basic/BuiltinsWebAssembly.def"
+
     ;
 
 static constexpr auto BuiltinInfos = Builtin::MakeInfos<NumBuiltins>({
@@ -35,6 +36,7 @@ static constexpr auto BuiltinInfos = Builtin::MakeInfos<NumBuiltins>({
 #define TARGET_BUILTIN CLANG_TARGET_BUILTIN_ENTRY
 #define LIBBUILTIN CLANG_LIBBUILTIN_ENTRY
 #include "clang/Basic/BuiltinsWebAssembly.def"
+
 });
 
 static constexpr llvm::StringLiteral ValidCPUNames[] = {
@@ -57,6 +59,9 @@ bool WebAssemblyTargetInfo::hasFeature(StringRef Feature) const {
       .Case("bulk-memory", HasBulkMemory)
       .Case("bulk-memory-opt", HasBulkMemoryOpt)
       .Case("call-indirect-overlong", HasCallIndirectOverlong)
+      .Case("compilation-hints",
+            HasCompilationHintsCallTargets || HasBranchHinting)
+      .Case("compilation-hints-call-targets", HasCompilationHintsCallTargets)
       .Case("exception-handling", HasExceptionHandling)
       .Case("extended-const", HasExtendedConst)
       .Case("fp16", HasFP16)
@@ -94,6 +99,10 @@ void WebAssemblyTargetInfo::getTargetDefines(const LangOptions &Opts,
     Builder.defineMacro("__wasm_bulk_memory__");
   if (HasBulkMemoryOpt)
     Builder.defineMacro("__wasm_bulk_memory_opt__");
+  if (HasCompilationHintsCallTargets || HasBranchHinting)
+    Builder.defineMacro("__wasm_compilation_hints__");
+  if (HasCompilationHintsCallTargets)
+    Builder.defineMacro("__wasm_compilation_hints_call_targets__");
   if (HasExceptionHandling)
     Builder.defineMacro("__wasm_exception_handling__");
   if (HasExtendedConst)
@@ -256,6 +265,22 @@ bool WebAssemblyTargetInfo::handleTargetFeatures(
     }
     if (Feature == "-call-indirect-overlong") {
       HasCallIndirectOverlong = false;
+      continue;
+    }
+    if (Feature == "+compilation-hints") {
+      HasCompilationHintsCallTargets = true;
+      continue;
+    }
+    if (Feature == "-compilation-hints") {
+      HasCompilationHintsCallTargets = false;
+      continue;
+    }
+    if (Feature == "+compilation-hints-call-targets") {
+      HasCompilationHintsCallTargets = true;
+      continue;
+    }
+    if (Feature == "-compilation-hints-call-targets") {
+      HasCompilationHintsCallTargets = false;
       continue;
     }
     if (Feature == "+exception-handling") {
