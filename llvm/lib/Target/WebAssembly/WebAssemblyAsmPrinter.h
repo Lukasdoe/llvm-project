@@ -25,6 +25,17 @@ struct BranchHintRecord {
   SmallVector<std::pair<MCSymbol *, uint8_t>, 0> Hints;
 };
 
+struct ICallTargetRecord {
+    MCSymbol *CallTargetSym;
+    // frequency in percent: [0, 100]
+    uint8_t CallFrequency;
+};
+
+struct FunctionICallInformation {
+  MCSymbol *FuncSym;
+  SmallVector<std::pair<MCSymbol *, SmallVector<ICallTargetRecord, 1>>, 0> ICallHints;
+};
+
 class LLVM_LIBRARY_VISIBILITY WebAssemblyAsmPrinter final : public AsmPrinter {
 public:
   static char ID;
@@ -37,6 +48,7 @@ private:
 
   // vec idx == local func_idx
   SmallVector<BranchHintRecord> BranchHints;
+  SmallVector<FunctionICallInformation> ICallTargetHints;
 
 public:
   explicit WebAssemblyAsmPrinter(TargetMachine &TM,
@@ -76,6 +88,7 @@ public:
   void EmitTargetFeatures(Module &M);
   void EmitFunctionAttributes(Module &M);
   void emitBranchHintSection() const;
+  void emitCHCallTargetsSection() const;
   void emitSymbolType(const MCSymbolWasm *Sym);
   void emitGlobalVariable(const GlobalVariable *GV) override;
   void emitJumpTableInfo() override;

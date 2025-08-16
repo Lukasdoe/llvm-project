@@ -545,7 +545,7 @@ void ObjFile::parse(bool ignoreComdats) {
       uint32_t alignment = getCustomSectionAlignment(section);
       if (shouldMerge(section))
         customSec = make<MergeInputChunk>(section, this, alignment);
-      else if (section.Name == "metadata.code.branch_hint")
+      else if (section.Name == "metadata.code.branch_hint" || section.Name == "metadata.code.call_targets")
         customSec = make<CodeMetaDataInputSection>(section, this, alignment);
       else
         customSec = make<InputSection>(section, this, alignment);

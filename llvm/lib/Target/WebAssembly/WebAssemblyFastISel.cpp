@@ -912,6 +912,11 @@ bool WebAssemblyFastISel::selectCall(const Instruction *I) {
 
   if (!IsVoid)
     updateValueMap(Call, ResultReg);
+
+  MIB->addOperand(MachineOperand::CreateMetadata(
+    MDNode::get(MF->getFunction().getContext(),
+                {ValueAsMetadata::get(const_cast<Instruction*>(I))})
+  ));
   return true;
 }
 

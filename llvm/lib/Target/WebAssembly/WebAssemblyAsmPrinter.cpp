@@ -40,6 +40,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCContext.h"
@@ -48,6 +49,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -454,8 +456,10 @@ void WebAssemblyAsmPrinter::emitEndOfAsmFile(Module &M) {
   EmitFunctionAttributes(M);
 
   // Subtarget may be null if no functions have been defined in file
-  if (Subtarget && Subtarget->hasBranchHinting())
-    emitBranchHintSection();
+  if (Subtarget) {
+    if (Subtarget->hasBranchHinting()) emitBranchHintSection();
+    if (Subtarget->hasCompilationHintsCallTargets()) emitCHCallTargetsSection();
+  }
 }
 
 void WebAssemblyAsmPrinter::emitBranchHintSection() const {
@@ -488,6 +492,34 @@ void WebAssemblyAsmPrinter::emitBranchHintSection() const {
           instrSym, WebAssembly::S_DEBUG_REF, OutContext));
       OutStreamer->emitULEB128IntValue(1); // hint size
       OutStreamer->emitULEB128IntValue(hint);
+    }
+  }
+  OutStreamer->popSection();
+}
+
+void WebAssemblyAsmPrinter::emitCHCallTargetsSection() const {
+  MCSectionWasm *CHCallTargetsSection = OutContext.getWasmSection(".custom_section.metadata.code.call_targets", SectionKind::getMetadata());
+  const uint32_t NumFunctionHints = std::count_if(ICallTargetHints.begin(), ICallTargetHints.end(), [](const auto &FH) { return !FH.ICallHints.empty(); });
+  if (NumFunctionHints == 0)
+    return;
+  OutStreamer->pushSection();
+  OutStreamer->switchSection(CHCallTargetsSection);
+  OutStreamer->emitULEB128IntValue(NumFunctionHints);
+  for (const auto &[FuncSym, ICalls] : ICallTargetHints) {
+    if (ICalls.empty())
+      continue;
+    // emit relocatable function index for the function symbol
+    OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(FuncSym, WebAssembly::S_FUNCINDEX, OutContext));
+    // emit the number of hints for this function (is constant -> does not need handling by target streamer for reloc)
+    OutStreamer->emitULEB128IntValue(ICalls.size());
+    for (const auto &[InstrSym, Targets] : ICalls) {
+      // offset from function start
+      OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(InstrSym, WebAssembly::S_DEBUG_REF, OutContext));
+      OutStreamer->emitULEB128IntValue(10 * Targets.size()); // hint size
+      for (const auto &[CallTargetSym, CallFrequency] : Targets) {
+        OutStreamer->emitULEB128Value(MCSymbolRefExpr::create(CallTargetSym, WebAssembly::S_FUNCINDEX, OutContext));
+        OutStreamer->emitULEB128IntValue(CallFrequency, 5);
+      }
     }
   }
   OutStreamer->popSection();
@@ -835,6 +867,63 @@ void WebAssemblyAsmPrinter::emitInstruction(const MachineInstr *MI) {
     // These are pseudo instructions to represent catch clauses in try_table
     // instruction to simulate block return values.
     break;
+  case WebAssembly::CALL_INDIRECT:
+  case WebAssembly::CALL_INDIRECT_S:
+  case WebAssembly::RET_CALL_INDIRECT:
+  case WebAssembly::RET_CALL_INDIRECT_S: {
+    MI->dump();
+    for (const MachineOperand &MO : MI->operands()) {
+      if (MO.isMetadata()) {
+        const MDNode *N = MO.getMetadata();
+        // We expect a single-operand MDNode containing our value.
+        if (N && N->getNumOperands() > 0) {
+          // Check if the operand is a ValueAsMetadata
+          if (auto *VAM = dyn_cast<ValueAsMetadata>(N->getOperand(0))) {
+            Value *V = VAM->getValue();
+            // Finally, cast the Value back to an Instruction.
+            if (Instruction *I = dyn_cast<Instruction>(V)) {
+              I->dump();
+              uint64_t TotalCount;
+              SmallVector<InstrProfValueData, 4> InstValueDataAnnotations = getValueProfDataFromInst(*I, IPVK_IndirectCallTarget, std::numeric_limits<uint32_t>::max(), TotalCount);
+              InstrProfSymtab Symtab;
+              Module& M = *MF->getFunction().getParent();
+              if (Error E = Symtab.create( M)) {
+                std::string SymtabFailure = toString(std::move(E));
+                abort();
+              }
+              if (InstValueDataAnnotations.empty()) {
+                break;
+              }
+              MCSymbol* LocalFuncSym = getSymbol(&MF->getFunction());
+              const uint32_t LocalFuncIdx = MF->getFunctionNumber();
+              if (ICallTargetHints.size() <= LocalFuncIdx) {
+                ICallTargetHints.resize(LocalFuncIdx + 1);
+                ICallTargetHints[LocalFuncIdx].FuncSym = LocalFuncSym;
+              }
+
+              MCSymbol *IndirectCallLabel = OutContext.createTempSymbol();
+              OutStreamer->emitLabel(IndirectCallLabel);
+              auto& TargetRecords = ICallTargetHints[LocalFuncIdx].ICallHints.emplace_back(IndirectCallLabel, SmallVector<ICallTargetRecord>{}).second;
+
+              for (const auto &Data : InstValueDataAnnotations) {
+                assert(Data.Count <= TotalCount);
+                const auto *const Func = Symtab.getFunction(Data.Value);
+                auto *const FuncSym = getSymbol(Func);
+                assert(FuncSym && "Could not resolve function symbol for indirect call target");
+                const uint8_t CallFrequency = static_cast<uint8_t>(static_cast<double>(Data.Count) / TotalCount * 100);
+                TargetRecords.emplace_back(ICallTargetRecord{FuncSym, CallFrequency});
+                dbgs() << "Indirect call target: " << FuncSym->getName()
+                                  << ", Count: " << Data.Count
+                                  << ", Frequency: " << static_cast<unsigned>(CallFrequency)
+                                  << "\n";
+              }
+            }
+          }
+        }
+      }
+    }
+   break;
+  }
   default: {
     WebAssemblyMCInstLower MCInstLowering(OutContext, *this);
     MCInst TmpInst;
