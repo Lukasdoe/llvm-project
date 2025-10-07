@@ -71,6 +71,10 @@ static cl::opt<float>
                       cl::desc("highest branch probability to be annotated as "
                                "unlikely taken (range [0.0-1.0])"),
                       cl::init(0.5f));
+static cl::opt<bool>
+    WasmBranchProbNonBin("wasm-branch-prob-non-bin", cl::Hidden,
+                         cl::desc("allow non-binary branch probabilities"),
+                         cl::init(false));
 
 //===----------------------------------------------------------------------===//
 // Helpers.
@@ -818,13 +822,19 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
   OutStreamer->emitLabel(BrIfSym);
   const uint32_t D = BranchProbability::getOne().getDenominator();
   uint8_t HintValue;
-  if (Prob > BranchProbability::getRaw(ThresholdProbHigh * D))
-    HintValue = static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::LIKELY);
-  else if (Prob <= BranchProbability::getRaw(ThresholdProbLow * D))
-    HintValue =
-        static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::UNLIKELY);
-  else
-    return; // Don't emit branch hint between thresholds
+  if (WasmBranchProbNonBin.getValue()) {
+    // 127 is the highest uleb128 integer that has a single byte encoding
+    HintValue = Prob.scale(127);
+  } else {
+    if (Prob > BranchProbability::getRaw(ThresholdProbHigh * D))
+      HintValue =
+          static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::LIKELY);
+    else if (Prob <= BranchProbability::getRaw(ThresholdProbLow * D))
+      HintValue =
+          static_cast<uint8_t>(wasm::WasmCodeMetadataBranchHint::UNLIKELY);
+    else
+      return; // Don't emit branch hint between thresholds
+  }
 
   // we know that we only emit branch hints for internal functions,
   // therefore we can directly cast and don't need getMCSymbolForFunction

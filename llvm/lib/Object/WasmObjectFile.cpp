@@ -1055,10 +1055,6 @@ Error WasmObjectFile::parseBranchHintSection(ReadContext &Ctx) {
       Hint.Offset = readVaruint32(Ctx);
       Hint.Size = readVaruint32(Ctx);
       uint8_t Data = readUint8(Ctx);
-      if (Data > 0x1) {
-        dbgs() << "invalid branch hint data; hint out of range [0; 1]; "
-                  "ignoring metadata.code.branch_hint section.\n";
-      }
       Hint.Data = static_cast<wasm::WasmCodeMetadataBranchHint>(Data);
       FuncEntry.Hints.push_back(Hint);
     }
