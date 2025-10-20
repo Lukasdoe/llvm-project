@@ -76,6 +76,11 @@ static cl::opt<bool>
                          cl::desc("allow non-binary branch probabilities"),
                          cl::init(false));
 
+static cl::opt<unsigned>
+    WasmBranchProbNonBinBits("wasm-branch-hint-bits", cl::Hidden,
+                         cl::desc("how many bits to use for non-binary branch probability hints (1-7)"),
+                         cl::init(7));
+
 //===----------------------------------------------------------------------===//
 // Helpers.
 //===----------------------------------------------------------------------===//
@@ -824,7 +829,8 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
   uint8_t HintValue;
   if (WasmBranchProbNonBin.getValue()) {
     // 127 is the highest uleb128 integer that has a single byte encoding
-    HintValue = Prob.scale(127);
+    const uint64_t LargestHint = std::pow(2, WasmBranchProbNonBinBits.getValue()) - 1;
+    HintValue = std::min(Prob.scale(LargestHint + 1), LargestHint);
   } else {
     if (Prob > BranchProbability::getRaw(ThresholdProbHigh * D))
       HintValue =
