@@ -830,7 +830,7 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
   if (WasmBranchProbNonBin.getValue()) {
     // 127 is the highest uleb128 integer that has a single byte encoding
     const uint64_t LargestHint = std::pow(2, WasmBranchProbNonBinBits.getValue()) - 1;
-    HintValue = std::min(Prob.scale(LargestHint + 1), LargestHint);
+    HintValue = Prob.scale(LargestHint);
   } else {
     if (Prob > BranchProbability::getRaw(ThresholdProbHigh * D))
       HintValue =
