@@ -829,8 +829,8 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
   uint8_t HintValue;
   if (WasmBranchProbNonBin.getValue()) {
     // 127 is the highest uleb128 integer that has a single byte encoding
-    const uint64_t LargestHint = std::pow(2, WasmBranchProbNonBinBits.getValue()) - 1;
-    HintValue = Prob.scale(LargestHint);
+    const uint64_t NumHintValues = std::pow(2, WasmBranchProbNonBinBits.getValue());
+    HintValue = std::min(Prob.scale(NumHintValues), NumHintValues - 1);
   } else {
     if (Prob > BranchProbability::getRaw(ThresholdProbHigh * D))
       HintValue =
@@ -841,6 +841,7 @@ void WebAssemblyAsmPrinter::recordBranchHint(const MachineInstr *MI) {
     else
       return; // Don't emit branch hint between thresholds
   }
+  // outs() << Prob << " -> " << unsigned(HintValue) << "\n";
 
   // we know that we only emit branch hints for internal functions,
   // therefore we can directly cast and don't need getMCSymbolForFunction
